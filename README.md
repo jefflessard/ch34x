@@ -35,6 +35,20 @@
 
 ---
 
+#### DEBUG_READ (0x95)  
+**Endpoint:** USB Control IN  
+**Description:** Reads internal debug registers (requires vendor clarification)  
+**Response:** 2 bytes (unknown purpose)
+
+---
+
+#### DEBUG_WRITE (0x9A)  
+**Endpoint:** USB Control OUT  
+**Description:** Writes internal debug registers (requires vendor clarification)  
+**Parameters:** 2 bytes (unknown purpose)
+
+---
+
 #### CMD_PARA_INIT (0xB1)  
 **USB Endpoint:** USB Control OUT  
 **Description:** Initializes parallel port mode (EPP or MEM).  
@@ -44,6 +58,13 @@
 | 0    | 0xB1 | Command code |
 | 1    | 0x00/0x02 | Mode low byte:<br>- 0x00: EPP Mode<br>- 0x02: MEM Mode |
 | 2    | 0x00 | Mode high byte |
+
+---
+
+#### CMD_BUF_CLEAR (0xB2)  
+**Endpoint:** USB Control OUT  
+**Description:** Discards residual data in all interface buffers  
+**Parameters:** None
 
 ---
 
