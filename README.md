@@ -247,11 +247,20 @@ Use `CH341_CMD_UIO_STREAM UIO_STM_OUT (0xAB 0x80)` with masks:
 - No response generated  
 - Must follow SET/STA/STO/OUT/IN subcommands  
 
+**I²C Address Handling**  
+The driver must implements standard 7-bit I²C addressing with an 8-bit format where:  
+- The **higher 7 bits** (1-7) carry the actual I²C address  
+- **Bit 0** (MSB) serves as the read/write flag:  
+  - `0` = Write operation  
+  - `1` = Read operation  
+
+For example, address `0x50` becomes `0xA0` (0x50 << 1) during write operations and `0xA1` (0x50 << 1 | 1) during read operations. This left-shift by 1 and R/W flag addition follows conventional I²C protocol requirements. Always verify address formatting matches target device expectations.
+
 **Example Usage:**  
 To write 3 bytes to address 0x50:  
 ```
 [0xAA, 0x74, 0x00]  // START
-[0xAA, 0x80, 0x04, 0x50, 0x01, 0x02, 0x03] // WRITE 3 bytes
+[0xAA, 0x80, 0x04, 0xA0, 0x01, 0x02, 0x03] // WRITE 3 bytes
 [0xAA, 0x75, 0x00]  // STOP
 [0xAA, 0x00, 0x00]  // END
 ```
@@ -330,11 +339,31 @@ Identical to GET_STATUS (0xA0) command response structure
 ---
 
 #### Interrupt Handling
-**INT# Pin:**  
-- Active-low hardware interrupt  
+ 
+Supports hardware interrupts on one configurable GPIO pin. Key configuration parameters:
 
-**GPIO Interrupts:**  
-- Enabled via 0xAB 0x40 command's direction mask  
-- Bit 5 (interrupt enable) and bit 3 (trigger status) in interrupt buffer  
+**Hardware Interrupt Pin**  
+- Only GPIO 19 (D4) supports hardware interrupts  
+- Must be configured as input in board configuration  
+- Requires external pull-up resistor  
+
+**Interrupt Polarity**  
+- Active-low interrupt signal (INT#)  
+- Triggers on rising edges (0→1 transitions after debouncing)  
+
+**Configuration Requirements**  
+- Enable interrupt detection via `CH341_CMD_SET_OUTPUT` or `CH341_CMD_UIO_STREAM UIO_STM_OUT` command's direction mask  
+- Configure target GPIO as input (Bit 5=1 in direction mask)  
+- Use interrupt buffer status bits:  
+  - Bit 5: Interrupt enable (1=active)  
+  - Bit 3: Trigger status (1=pending interrupt)  
+
+**Hardware Limitations**  
+- Only one GPIO can generate hardware interrupts  
+- Interrupt detection requires USB polling for status updates  
+- Interrupts share bandwidth with normal USB transfers  
+
+**Software interrupts**
+- Software polling for GPIOs 0-7 and 15-18 can be implemented if needed.
 
 ---
