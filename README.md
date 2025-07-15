@@ -1,10 +1,17 @@
 ### CH341A USB Bridge Chip Interface Documentation
 
+- All commands support both **USB Control OUT** and **USB Bulk OUT** endpoints unless explicitly stated otherwise
+- All multi-byte values use little-endian format  
+
+**Maximum Values:**  
+- EPP/MEM transfers: 31 bytes  
+- SPI transfers: 32 bytes  
+- I²C addresses: 2-byte (EEPROM >256 bytes)  
+- Interrupt detection: 8 GPIO channels  
+
 #### CH341_CMD_PARA_INIT (0xB1)  
 **USB Endpoint:**  
 - USB Control OUT
-or  
-- USB Bulk OUT
 
 **Description:** Initializes parallel port mode (EPP or MEM).  
 **Parameters:**  
@@ -19,6 +26,7 @@ or
 #### CH341_CMD_GET_STATUS (0xA0)
 **USB Endpoint:** BULK_OUT (1 byte command) → BULK_IN (3-byte response)  
 **Description:** Reads parallel port status, GPIO states, and interface flags.  
+
 **Response Structure:**  
 | Byte | Bit Position | Name       | Type     | Description                          |
 |------|--------------|------------|----------|--------------------------------------|
@@ -34,6 +42,11 @@ or
 |      | 15           | SLCTIN#    | I²C Only | Address strobe (I²C address phase)   |
 |      | 15           | ADDRS#     | SPI Only | SPI address/command phase            |
 |      | 23           | SDA        | I²C Only | I²C data line state (if connected)   |
+
+**Status Flags:**  
+- BUSY/WAIT# indicates active transfer  
+- DATAS#/AUTOFD# polarity depends on interface configuration  
+- ERR# shows hardware fault condition  
 
 **Clarifications:**  
 - **Bit Position** shows exact location within response byte (0 = least significant)  
@@ -85,7 +98,7 @@ For example:
 |------|-------------|------------------|--------------------------------------|
 | 0    | 0xA1        | Command code     | Always 0xA1                          |
 | 1    | 0x6A        | Fixed value      | Required constant                    |
-| 2    | Mask        | Output Enable    | Selects GPIO banks for update:<br>**Bit 4**: GPIO [23:16]<br>**Bit 5**: GPIO [15:8]<br>**Bit 6**: GPIO [7:0]<br>(1=enable update, 0=no change) |
+| 2    | Mask        | Output Enable    | Selects GPIO banks for update:<br>**Bit 4**: GPIO [23:16] (controls RESET#, WRITE#, SCL, SDA)<br>**Bit 5**: GPIO [15:8]<br>**Bit 6**: GPIO [7:0]<br>(1=enable update, 0=no change) |
 | 3    | Data Byte 1 | GPIO Data [15:8] | Output values for GPIO 15-8 (LSB-first)|
 | 4    | Dir Byte 1  | GPIO Dir [15:8]  | Direction control:<br>**Bit [4:0]**: GPIO [15:11] direction (0=input, 1=output)<br>Bits [7:5] always 0x02 mask |
 | 5    | Data Byte 2 | GPIO Data [7:0]  | Output values for GPIO 7-0          |
@@ -94,12 +107,12 @@ For example:
 | 8-10 | 0x00        | Padding          | Unused                               |
 
 **Output-Only Pins:**  
-| Bit | GPIO | Signal | Description          |
-|-----|------|--------|----------------------|
-| 16  | 16   | RESET# | Active-low reset     |
-| 17  | 17   | WRITE# | Active-low write strobe |
-| 18  | 18   | SCL    | I²C clock line       |
-| 29  | 29   | SDA    | I²C data line        |
+| GPIO | Signal | Description          |
+|------|--------|----------------------|
+| 16   | RESET# | Active-low reset     |
+| 17   | WRITE# | Active-low write strobe |
+| 18   | SCL    | I²C clock line       |
+| 19   | SDA    | I²C data line        |
 
 **Notes:**  
 1. Mask byte (Byte 2) controls **which GPIO banks** get updated, not individual bits:  
@@ -129,9 +142,11 @@ To set GPIO [7:0] as outputs and GPIO [23:16] to fixed values:
 - Byte 7 = 0x0F (set RESET#=0, WRITE#=1, SCL=0, SDA=1)  
 
 **Critical Notes:**  
-- GPIO [23:16] can't be configured as inputs  
+- GPIO [23:16] always operate as outputs but state comes from:  
+  - Byte 7 (Data) for RESET#/WRITE#/SCL/SDA  
+  - Byte 3/4 (Data/Dir) for GPIO [19:16] when enabled via Mask Byte 2, Bit 4  
 - GPIO [19:16] direction controlled by Mask Byte 2, Bit 4 but lack dedicated data bytes  
-- SDA (bit 29) and SCL (bit 18) only function in I²C mode
+- SDA (bit 19) and SCL (bit 18) only function in I²C mode
 
 ---
 
@@ -172,7 +187,7 @@ Use `CH341_CMD_UIO_STREAM UIO_STM_OUT (0xAB 0x80)` with masks:
 |------|-------------|--------------|----------------------|
 | 0    | 0xAA        | Stream Code  | Always 0xAA          |
 | 1    | 0x60        | Subcommand   | I²C speed config     |
-| 2    | Speed Byte  | **I²C Speed Values:**<br>- 0x00: 20 kbps<br>- 0x01: 100 kbps<br>- 0x02: 400 kbps<br>- 0x03: 750 kbps |
+| 2    | Speed Byte  | **I²C Speed Values:**<br>- 0x00: 20 kHz<br>- 0x01: 100 kHz<br>- 0x02: 400 kHz<br>- 0x03: 750 kHz |
 
 **No Response**
 
@@ -216,6 +231,38 @@ Use `CH341_CMD_UIO_STREAM UIO_STM_OUT (0xAB 0x80)` with masks:
 | 2    | Len Byte    | Byte Count   | Number of bytes to read (N) |
 
 **Response:** via BULK_IN (N bytes)
+
+##### I2C_STM_END (0x00)  
+**Description:** Terminates I²C command stream sequence  
+**Parameters:**  
+| Byte | Value       | Field        | Description          |
+|------|-------------|--------------|----------------------|
+| 0    | 0xAA        | Stream Code  | Always 0xAA          |
+| 1    | 0x00        | Subcommand   | End sequence         |
+| 2    | Unused      | -            | Must be 0x00         |
+
+**Behavior:**  
+- Required as final entry in all I²C command sequences  
+- Marks end of transaction buffer  
+- No response generated  
+- Must follow SET/STA/STO/OUT/IN subcommands  
+
+**Example Usage:**  
+To write 3 bytes to address 0x50:  
+```
+[0xAA, 0x74, 0x00]  // START
+[0xAA, 0x80, 0x04, 0x50, 0x01, 0x02, 0x03] // WRITE 3 bytes
+[0xAA, 0x75, 0x00]  // STOP
+[0xAA, 0x00, 0x00]  // END
+```
+
+**Critical Notes:**  
+- Failure to include END subcommand will leave transaction incomplete  
+- All I²C operations require proper START/END framing  
+- Must be preceded by valid I²C_STREAM subcommand (never first entry)  
+
+The END subcommand serves as a required terminator for all I²C operations. Its omission would prevent proper transaction closure and must be included in all command sequences following the pattern:  
+`[I2C_STM_*] → [I2C_STM_END]`
 
 ---
 
@@ -268,6 +315,18 @@ Use `CH341_CMD_UIO_STREAM UIO_STM_OUT (0xAB 0x80)` with masks:
 
 **No Response**
 
+##### UIO_STM_US (0xC0)  
+**Description:** Unified status read (combines GPIO/SPI status)  
+**Parameters:**  
+| Byte | Value | Field        | Description                  |
+|------|-------|--------------|------------------------------|
+| 0    | 0xAB  | Stream Code  | Always 0xAB                  |
+| 1    | 0xC0  | Subcommand   | Unified status read          |
+| 2    | 0x00  | Unused       | Must be 0x00 (reserved)      |
+
+**Response:**  
+Identical to GET_STATUS (0xA0) command response structure    
+
 ---
 
 #### Interrupt Handling
@@ -279,18 +338,3 @@ Use `CH341_CMD_UIO_STREAM UIO_STM_OUT (0xAB 0x80)` with masks:
 - Bit 5 (interrupt enable) and bit 3 (trigger status) in interrupt buffer  
 
 ---
-
-### Notes
-- All multi-byte values use little-endian format  
-- Output-only pins: RESET# (16), WRITE# (17), SCL (18), SDA (29)  
-
-**Status Flags:**  
-- BUSY/WAIT# indicates active transfer  
-- DATAS#/AUTOFD# polarity depends on interface configuration  
-- ERR# shows hardware fault condition  
-
-**Maximum Values:**  
-- EPP/MEM transfers: 31 bytes  
-- SPI transfers: 32 bytes  
-- I²C addresses: 2-byte (EEPROM >256 bytes)  
-- Interrupt detection: 8 GPIO channels
