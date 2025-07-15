@@ -1,7 +1,8 @@
 ### CH341A USB Bridge Chip Interface Documentation
 
 - All commands support both **USB Control OUT** and **USB Bulk OUT** endpoints unless explicitly stated otherwise
-- All multi-byte values use little-endian format  
+- All multi-byte values use little-endian format
+- All delays require explicit values (no default timing)  
 
 **Maximum Values:**  
 - EPP/MEM transfers: 31 bytes  
@@ -9,39 +10,61 @@
 - I²C addresses: 2-byte (EEPROM >256 bytes)  
 - Interrupt detection: 8 GPIO channels  
 
-#### CH341_CMD_PARA_INIT (0xB1)  
-**USB Endpoint:**  
-- USB Control OUT
+---
 
+#### VENDOR_VERSION (0x5F)  
+**USB Endpoint:** USB Control IN  
+**Description:** Returns chip version identifier  
+
+**Response:**  
+| Byte | Value | Description         |
+|------|-------|---------------------|
+| 0    | 0x??  | Version low byte    |
+| 1    | 0x??  | Version high byte   |
+
+**Common Response:**  
+- 0x0030 indicates CH341A revision
+
+---
+
+#### I2C_CMD_X (0x54)  
+**USB Endpoint:** USB Control OUT  
+**Description:** Extended I²C command (specific functionality unknown - requires vendor clarification).  
+
+**Parameters:**  Unknown
+
+---
+
+#### CMD_PARA_INIT (0xB1)  
+**USB Endpoint:** USB Control OUT  
 **Description:** Initializes parallel port mode (EPP or MEM).  
 **Parameters:**  
 | Byte | Value       | Description               |
 |------|-------------|---------------------------|
 | 0    | 0xB1 | Command code |
-| 1    | 0x0? | Mode low byte:<br>- 0x00: EPP Mode<br>- 0x02: MEM Mode |
+| 1    | 0x00/0x02 | Mode low byte:<br>- 0x00: EPP Mode<br>- 0x02: MEM Mode |
 | 2    | 0x00 | Mode high byte |
 
 ---
 
-#### CH341_CMD_GET_STATUS (0xA0)
+#### CMD_GET_STATUS (0xA0)
 **USB Endpoint:** BULK_OUT (1 byte command) → BULK_IN (3-byte response)  
 **Description:** Reads parallel port status, GPIO states, and interface flags.  
 
 **Response Structure:**  
-| Byte | Bit Position | Name       | Type     | Description                          |
-|------|--------------|------------|----------|--------------------------------------|
-| 0    | [0-7]        | D[7:0]     | GPIO     | Current state of data lines 0-7      |
-| 1    | 7            | ERR#       | Flag     | Error condition (0=OK, 1=Error)      |
-|      | 8            | PEMP       | Flag     | Parallel port empty (0=Busy, 1=Ready)|
-|      | 9            | INT#       | Interrupt| GPIO interrupt request (0=No, 1=Yes)  |
-|      | 10           | SLCT       | Control  | Chip select status (0=Inactive, 1=Active)|
-| 2    | 8            | D[15:8]    | GPIO     | Current state of data lines 15-8     |
-|      | 13           | WAIT#      | Control  | Wait state (0=Busy, 1=Idle)         |
-|      | 14           | AUTOFD#    | I²C Only | Auto-feed status (I²C slave mode)    |
-|      | 14           | DATAS#     | SPI Only | Data strobe (SPI transfer active)    |
-|      | 15           | SLCTIN#    | I²C Only | Address strobe (I²C address phase)   |
-|      | 15           | ADDRS#     | SPI Only | SPI address/command phase            |
-|      | 23           | SDA        | I²C Only | I²C data line state (if connected)   |
+| Byte | Bit Pos | Name   | Type   | Description                  |
+|------|---------|--------|--------|------------------------------|
+| 0    | [0-7]   | D[7:0] | GPIO   | Current state of data lines 0-7 |
+| 1    | 7       | ERR#   | Flag   | Error condition (0=OK, 1=Error) |
+|      | 8       | PEMP   | Flag   | Parallel port empty (0=Busy, 1=Ready) |
+|      | 9       | INT#   | Flag   | Interrupt pending (0=No,1=Yes)  |
+|      | 10      | SLCT   | Control | Chip select active (0=Inactive, 1=Active)   |
+| 2    | 8       | D[15:8]| GPIO   | Current state of data lines 15-8 |
+|      | 13      | WAIT#  | Control | Wait state (0=Busy, 1=Idle)          |
+|      | 14      | AUTOFD#    | I²C Only | Auto-feed status (I²C slave mode)    |
+|      |         | DATAS#     | SPI Only | Data strobe (SPI transfer active)    |
+|      | 15      | SLCTIN#    | I²C Only | Address strobe (I²C address phase)   |
+|      |         | ADDRS#     | SPI Only | SPI address/command phase            |
 
 **Status Flags:**  
 - BUSY/WAIT# indicates active transfer  
@@ -72,13 +95,11 @@
      - AUTOFD#/DATAS# polarity depends on interface mode  
      - SLCTIN#/ADDRS# indicates protocol phase  
      - ADDRS#/SLCTIN# polarity depends on interface
-     - SDA only appears in I²C transactions
 
 **Implementation Details:**  
 - All status bits read as active-high logic (1=active)  
 - Unused bits [12:11] and [16:15] (SPI mode) remain reserved  
 - Interrupt detection requires prior configuration via SET_OUTPUT command  
-- SDA state reflects last I²C transaction state  
 
 For example:  
 - If **Byte 1 = 0x05**, this means:  
@@ -89,7 +110,7 @@ For example:
 
 ---
 
-#### CH341_CMD_SET_OUTPUT (0xA1)
+#### CMD_SET_OUTPUT (0xA1)
 **USB Endpoint:** BULK_OUT (11 bytes)  
 **Description:** Configures GPIO direction and output states. First byte 0xA1, second byte 0x6A (fixed), third byte controls update masks.  
 
@@ -150,7 +171,31 @@ To set GPIO [7:0] as outputs and GPIO [23:16] to fixed values:
 
 ---
 
-#### CH341_CMD_SPI_STREAM (0xA8)  
+#### CMD_IO_ADDR (0xA2)  
+**USB Endpoint:** BULK_OUT  
+**Description:** Sets memory interface address for subsequent EPP/MEM operations.  
+
+**Parameters:**  
+| Byte | Value    | Description         |
+|------|----------|---------------------|
+| 0    | 0xA2     | Command code        |
+| 1-2  | Addr     | 16-bit address value|
+
+**Hardware Behavior:**  
+- For MEM mode: Establishes target address for read/write operations  
+- For EPP mode: May control register selection (requires vendor clarification)
+
+---
+
+#### CMD_PRINT_OUT (0xA3)  
+**USB Endpoint:** BULK_OUT  
+**Description:** Hardware print function (exact behavior unknown - requires vendor clarification).  
+
+**Parameters:** Unkown  
+
+---
+
+#### CMD_SPI_STREAM (0xA8)  
 **USB Endpoint:** BULK_OUT (command+data) → BULK_IN (response)  
 **Description:** SPI data transfer
 **Parameters:**  
@@ -165,7 +210,7 @@ To set GPIO [7:0] as outputs and GPIO [23:16] to fixed values:
 | 0-N  | [7:0]     | Data Bytes | MISO data (if connected) |
 
 **Chip Select Control:**  
-Use `CH341_CMD_UIO_STREAM UIO_STM_OUT (0xAB 0x80)` with masks:  
+Use `CMD_UIO_STREAM UIO_STM_OUT (0xAB 0x80)` with masks:  
 | Mask | CS Behavior       |
 |------|-------------------|
 | 0x36 | All CS inactive   |
@@ -175,19 +220,47 @@ Use `CH341_CMD_UIO_STREAM UIO_STM_OUT (0xAB 0x80)` with masks:
 
 ---
 
-#### CH341_CMD_I2C_STREAM (0xAA)
-**USB Endpoint:** **USB Endpoint:** BULK_OUT (command+data) → BULK_IN (optional response)    
+#### CMD_SIO_STREAM (0xA9)  
+**USB Endpoint:** Bulk OUT  
+**Description:** Serial Input/Output stream interface (protocol details unknown - requires vendor clarification).  
+**Parameters:**  Unkown
+
+---
+
+#### CMD_I2C_STREAM (0xAA)
+**USB Endpoint:** BULK_OUT (command+data) → BULK_IN (optional response)    
 **Description:** I²C protocol command stream  
 
 **Subcommands:**
 
+##### I2C_STM_US (0x40)
+**Description:** Sets I²C delay in microseconds  
+| Byte | Value | Description                 |
+|------|-------|-----------------------------|
+| 0    | 0xAA  | Stream code                 |
+| 1    | 0x40  | Microsecond delay subcommand|
+| 2    | Delay | Delay value (1-15 µs)       |
+
+**No Response**  
+
+##### I2C_STM_MS (0x50)
+**Description:** Sets I²C delay in milliseconds  
+| Byte | Value | Description                 |
+|------|-------|-----------------------------|
+| 0    | 0xAA  | Stream code                 |
+| 1    | 0x50  | Millisecond delay subcommand|
+| 2    | Delay | Delay value (1-15 ms)       |
+
+**No Response**  
+
 ##### I2C_STM_SET (0x60)
 **Description:** Sets I²C bus speed configuration  
-| Byte | Value       | Field        | Description          |
-|------|-------------|--------------|----------------------|
-| 0    | 0xAA        | Stream Code  | Always 0xAA          |
-| 1    | 0x60        | Subcommand   | I²C speed config     |
-| 2    | Speed Byte  | **I²C Speed Values:**<br>- 0x00: 20 kHz<br>- 0x01: 100 kHz<br>- 0x02: 400 kHz<br>- 0x03: 750 kHz |
+| Byte | Value     | Field        | Description          |
+|------|-----------|--------------|----------------------|
+| 0    | 0xAA      | Stream Code  | Always 0xAA        |
+| 1    | 0x60      | Subcommand   |  |
+| 2    | 0x00-0x03 | I²C Speed    | **I²C clock rate:**<br>- 0x00: 20 kHz<br>- 0x01: 100 kHz<br>- 0x02: 400 kHz<br>- 0x03: 750 kHz |
+|      | Bit 7     | SPI Mode     | **SPI Mode:**<br>- 0: SPI single io<br>- 1: SPI dual io|
 
 **No Response**
 
@@ -275,7 +348,7 @@ The END subcommand serves as a required terminator for all I²C operations. Its 
 
 ---
 
-#### CH341_CMD_UIO_STREAM (0xAB)
+#### CMD_UIO_STREAM (0xAB)
 **USB Endpoint:** BULK_OUT (command+data) → BULK_IN (optional response)  
 **Description:** Unified interface for GPIO and SPI operations  
 
@@ -302,7 +375,7 @@ The END subcommand serves as a required terminator for all I²C operations. Its 
 | 1    | 0x40  | Subcommand  | GPIO direction control           |
 | 2    | 0x??  | Dir Mask    | Mask Structure:<br>- Bits [5:0]: GPIO [5:0] direction (0=input, 1=output)<br>- Bits [7:6] always 0 |
 
-**No Response**
+**No Response**  
 
 ##### UIO_STM_OUT (0x80)
 **Description:** Write GPIO [5:0]  
@@ -324,17 +397,23 @@ The END subcommand serves as a required terminator for all I²C operations. Its 
 
 **No Response**
 
-##### UIO_STM_US (0xC0)  
-**Description:** Unified status read (combines GPIO/SPI status)  
-**Parameters:**  
-| Byte | Value | Field        | Description                  |
-|------|-------|--------------|------------------------------|
-| 0    | 0xAB  | Stream Code  | Always 0xAB                  |
-| 1    | 0xC0  | Subcommand   | Unified status read          |
-| 2    | 0x00  | Unused       | Must be 0x00 (reserved)      |
+##### UIO_STM_MS (0x50)
+**Description:** Configures millisecond delay in UIO operations  
+| Byte | Value    | Field       | Description          |
+|------|----------|-------------|----------------------|
+| 0    | 0xAB     | Stream code | Required prefix      |
+| 1    | 0x50     | Subcommand  | Delay configuration  |
+| 2    | 0x00-0x0F| Delay       | Delay value (ms)     |
 
-**Response:**  
-Identical to GET_STATUS (0xA0) command response structure    
+**No Response**
+
+##### UIO_STM_US (0xC0)
+**Description:** Configures microsecond delay in UIO operations  
+| Byte | Value    | Field       | Description          |
+|------|----------|-------------|----------------------|
+| 0    | 0xAB     | Stream code | Required prefix      |
+| 1    | 0xC0     | Subcommand  | Delay configuration  |
+| 2    | 0x00-0x0F| Delay       | Delay value (µs)     |
 
 ---
 
