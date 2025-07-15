@@ -27,28 +27,6 @@
 
 ---
 
-#### I2C_CMD_X (0x54)  
-**USB Endpoint:** USB Control OUT  
-**Description:** Extended I²C command (specific functionality unknown - requires vendor clarification).  
-
-**Parameters:**  Unknown
-
----
-
-#### DEBUG_READ (0x95)  
-**Endpoint:** USB Control IN  
-**Description:** Reads internal debug registers (requires vendor clarification)  
-**Response:** 2 bytes (unknown purpose)
-
----
-
-#### DEBUG_WRITE (0x9A)  
-**Endpoint:** USB Control OUT  
-**Description:** Writes internal debug registers (requires vendor clarification)  
-**Parameters:** 2 bytes (unknown purpose)
-
----
-
 #### CMD_PARA_INIT (0xB1)  
 **USB Endpoint:** USB Control OUT  
 **Description:** Initializes parallel port mode (EPP or MEM).  
@@ -58,13 +36,6 @@
 | 0    | 0xB1 | Command code |
 | 1    | 0x00/0x02 | Mode low byte:<br>- 0x00: EPP Mode<br>- 0x02: MEM Mode |
 | 2    | 0x00 | Mode high byte |
-
----
-
-#### CMD_BUF_CLEAR (0xB2)  
-**Endpoint:** USB Control OUT  
-**Description:** Discards residual data in all interface buffers  
-**Parameters:** None
 
 ---
 
@@ -192,30 +163,6 @@ To set GPIO [7:0] as outputs and GPIO [23:16] to fixed values:
 
 ---
 
-#### CMD_IO_ADDR (0xA2)  
-**USB Endpoint:** BULK_OUT  
-**Description:** Sets memory interface address for subsequent EPP/MEM operations.  
-
-**Parameters:**  
-| Byte | Value    | Description         |
-|------|----------|---------------------|
-| 0    | 0xA2     | Command code        |
-| 1-2  | Addr     | 16-bit address value|
-
-**Hardware Behavior:**  
-- For MEM mode: Establishes target address for read/write operations  
-- For EPP mode: May control register selection (requires vendor clarification)
-
----
-
-#### CMD_PRINT_OUT (0xA3)  
-**USB Endpoint:** BULK_OUT  
-**Description:** Hardware print function (exact behavior unknown - requires vendor clarification).  
-
-**Parameters:** Unkown  
-
----
-
 #### CMD_SPI_STREAM (0xA8)  
 **USB Endpoint:** BULK_OUT (command+data) → BULK_IN (response)  
 **Description:** SPI data transfer
@@ -238,13 +185,6 @@ Use `CMD_UIO_STREAM UIO_STM_OUT (0xAB 0x80)` with masks:
 | 0x35 | CS via GPIO 1     |
 | 0x33 | CS via GPIO 2     |
 | 0x27 | CS via GPIO 4     |
-
----
-
-#### CMD_SIO_STREAM (0xA9)  
-**USB Endpoint:** Bulk OUT  
-**Description:** Serial Input/Output stream interface (protocol details unknown - requires vendor clarification).  
-**Parameters:**  Unkown
 
 ---
 
@@ -418,24 +358,6 @@ The END subcommand serves as a required terminator for all I²C operations. Its 
 
 **No Response**
 
-##### UIO_STM_MS (0x50)
-**Description:** Configures millisecond delay in UIO operations  
-| Byte | Value    | Field       | Description          |
-|------|----------|-------------|----------------------|
-| 0    | 0xAB     | Stream code | Required prefix      |
-| 1    | 0x50     | Subcommand  | Delay configuration  |
-| 2    | 0x00-0x0F| Delay       | Delay value (ms)     |
-
-**No Response**
-
-##### UIO_STM_US (0xC0)
-**Description:** Configures microsecond delay in UIO operations  
-| Byte | Value    | Field       | Description          |
-|------|----------|-------------|----------------------|
-| 0    | 0xAB     | Stream code | Required prefix      |
-| 1    | 0xC0     | Subcommand  | Delay configuration  |
-| 2    | 0x00-0x0F| Delay       | Delay value (µs)     |
-
 ---
 
 #### Interrupt Handling
@@ -467,3 +389,18 @@ Supports hardware interrupts on one configurable GPIO pin. Key configuration par
 - Software polling for GPIOs 0-7 and 15-18 can be implemented if needed.
 
 ---
+
+#### Undocumented constants
+The following constants are defined but unused/undocumented:
+| Command | Value | Comments |
+|---------|-------|----------|
+| I2C_STATUS | 0x52 | get I2C status |
+| DEBUG_READ | 0x95 | read two regs |
+| DEBUG_WRITE | 0x9A | write two regs to USB Control-OUT 0x2525 when setting parallel mode |
+| I2C_CMD_X | 0x54 | send I2C command |
+| DELAY_MS | 0x5E | |
+| CMD_IO_ADDR | 0xA2 | MEM IO Addr |
+| CMD_PRINT_OUT | 0xA3 | print output |
+| CMD_SIO_STREAM | 0xA9 | SIO command |
+| CMD_BUF_CLEAR | 0xB2 | clear uncompleted data |
+| UIO_STM_US | 0xC0 | UIO Interface Delay Command (us) |
