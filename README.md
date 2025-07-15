@@ -1,20 +1,24 @@
 ### CH341A USB Bridge Chip Interface Documentation
 
-#### CH341_CMD_PARA_INIT (0xB1)
-**USB Endpoint:** BULK_OUT  
+#### CH341_CMD_PARA_INIT (0xB1)  
+**USB Endpoint:**  
+- USB Control OUT
+or  
+- USB Bulk OUT
+
 **Description:** Initializes parallel port mode (EPP or MEM).  
 **Parameters:**  
-| Byte | Value | Description        |
-|------|-------|--------------------|
-| 0    | 0xB1  | Command code       |
-| 1    | 0x0?  | Mode configuration:<br>- 0x00 EPP Data Mode<br>- 0x01 EPP Address Mode<br>- 0x02 MEM Mode |
-| 2    | 0x00  | Reserved           |
+| Byte | Value       | Description               |
+|------|-------------|---------------------------|
+| 0    | 0xB1 | Command code |
+| 1    | 0x0? | Mode low byte:<br>- 0x00: EPP Mode<br>- 0x02: MEM Mode |
+| 2    | 0x00 | Mode high byte |
 
 ---
 
 #### CH341_CMD_GET_STATUS (0xA0)
 **USB Endpoint:** BULK_OUT (1 byte command) → BULK_IN (3-byte response)  
-**Description:** Reads parallel port status, GPIO states, and interface flags. 
+**Description:** Reads parallel port status, GPIO states, and interface flags.  
 **Response Structure:**  
 | Byte | Bit Position | Name       | Type     | Description                          |
 |------|--------------|------------|----------|--------------------------------------|
@@ -131,31 +135,35 @@ To set GPIO [7:0] as outputs and GPIO [23:16] to fixed values:
 
 ---
 
-#### CH341_CMD_I2C_STREAM (0xA1)
+#### CH341_CMD_SPI_STREAM (0xA8)  
+**USB Endpoint:** BULK_OUT (command+data) → BULK_IN (response)  
+**Description:** SPI data transfer
+**Parameters:**  
+| Byte | Value       | Field        | Description          |
+|------|-------------|--------------|----------------------|
+| 0    | 0xA8        | Command      | SPI transfer start   |
+| 1-N  | Data Bytes  | SPI Payload  | Up to 32 bytes LSB-first|
+
+**Response:** via BULK_IN  
+
+**Chip Select Control:**  
+Use `CH341_CMD_UIO_STREAM (0xAB 0x80)` with masks:  
+| Mask | CS Behavior       |
+|------|-------------------|
+| 0x36 | All CS inactive   |
+| 0x35 | CS via GPIO 1     |
+| 0x33 | CS via GPIO 2     |
+| 0x27 | CS via GPIO 4     |
+
+---
+
+#### CH341_CMD_I2C_STREAM (0xAA)
 **USB Endpoint:** BULK_OUT  
 **Description:** I²C protocol commands  
 **Parameters:**  
 - 0xA1 0xUS [delay]: Adds microsecond delay (LSB-first)  
 - 0xA1 0xSS: SPI stream configuration (S=speed bits)  
-- 0xA1 0xSE: SPI stream end  
-
-**SPI Chip Select:**  
-Use UIO_STM_OUT (0xAB 0x80) with masks:  
-- 0x36 → CS inactive (all outputs high)  
-- 0x35 → CS via D1  
-- 0x33 → CS via D2  
-- 0x27 → CS via D4
-
----
-
-#### CH341_CMD_SPI_STREAM (0xA8)
-**USB Endpoint:** BULK_OUT (command+data) → BULK_IN (response)  
-**Description:** Performs SPI transfer. First byte is command (0xA8), followed by data payload (up to 32 bytes).  
-**Parameters:**  
-- Byte 0: 0xA8 (Command code)  
-- Byte 1-N: SPI data payload (LSB-first per byte)  
-
-**Response:** Byte count matches data payload length
+- 0xA1 0xSE: SPI stream end
 
 ---
 
