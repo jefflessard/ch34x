@@ -144,10 +144,13 @@ To set GPIO [7:0] as outputs and GPIO [23:16] to fixed values:
 | 0    | 0xA8        | Command      | SPI transfer start   |
 | 1-N  | Data Bytes  | SPI Payload  | Up to 32 bytes LSB-first|
 
-**Response:** via BULK_IN  
+**Response:**  
+| Byte | Bit Range | Field   | Description      |
+|------|-----------|---------|------------------|
+| 0-N  | [7:0]     | Data Bytes | MISO data (if connected) |
 
 **Chip Select Control:**  
-Use `CH341_CMD_UIO_STREAM (0xAB 0x80)` with masks:  
+Use `CH341_CMD_UIO_STREAM UIO_STM_OUT (0xAB 0x80)` with masks:  
 | Mask | CS Behavior       |
 |------|-------------------|
 | 0x36 | All CS inactive   |
@@ -158,18 +161,67 @@ Use `CH341_CMD_UIO_STREAM (0xAB 0x80)` with masks:
 ---
 
 #### CH341_CMD_I2C_STREAM (0xAA)
-**USB Endpoint:** BULK_OUT  
-**Description:** I²C protocol commands  
-**Parameters:**  
-- 0xA1 0xUS [delay]: Adds microsecond delay (LSB-first)  
-- 0xA1 0xSS: SPI stream configuration (S=speed bits)  
-- 0xA1 0xSE: SPI stream end
+**USB Endpoint:** **USB Endpoint:** BULK_OUT (command+data) → BULK_IN (optional response)    
+**Description:** I²C protocol command stream  
+
+**Subcommands:**
+
+##### I2C_STM_SET (0x60)
+**Description:** Sets I²C bus speed configuration  
+| Byte | Value       | Field        | Description          |
+|------|-------------|--------------|----------------------|
+| 0    | 0xAA        | Stream Code  | Always 0xAA          |
+| 1    | 0x60        | Subcommand   | I²C speed config     |
+| 2    | Speed Byte  | **I²C Speed Values:**<br>- 0x00: 20 kbps<br>- 0x01: 100 kbps<br>- 0x02: 400 kbps<br>- 0x03: 750 kbps |
+
+**No Response**
+
+##### I2C_STM_STA (0x74)
+**Description:** Generates I²C start condition  
+| Byte | Value       | Field        | Description          |
+|------|-------------|--------------|----------------------|
+| 0    | 0xAA        | Stream Code  | Always 0xAA          |
+| 1    | 0x74        | Subcommand   | Start condition      |
+| 2    | Unused      | -            | Must be 0x00         |
+
+**No Response**
+
+##### I2C_STM_STO (0x75)
+**Description:** Generates I²C stop condition  
+| Byte | Value       | Field        | Description          |
+|------|-------------|--------------|----------------------|
+| 0    | 0xAA        | Stream Code  | Always 0xAA          |
+| 1    | 0x75        | Subcommand   | Stop condition       |
+| 2    | Unused      | -            | Must be 0x00         |
+
+**No Response**
+
+##### I2C_STM_OUT (0x80)
+**Description:** Writes I²C data bytes  
+| Byte | Value       | Field        | Description          |
+|------|-------------|--------------|----------------------|
+| 0    | 0xAA        | Stream Code  | Always 0xAA          |
+| 1    | 0x80        | Subcommand   | Data write           |
+| 2    | Len Byte    | Byte Count   | Number of bytes to write (N) |
+| 3-N  | Data Bytes  | Payload      | Up to 31 bytes       |
+
+**No Response**
+
+##### I2C_STM_IN (0xC0)
+**Description:** Reads I²C data bytes  
+| Byte | Value       | Field        | Description          |
+|------|-------------|--------------|----------------------|
+| 0    | 0xAA        | Stream Code  | Always 0xAA          |
+| 1    | 0xC0        | Subcommand   | Data read            |
+| 2    | Len Byte    | Byte Count   | Number of bytes to read (N) |
+
+**Response:** via BULK_IN (N bytes)
 
 ---
 
 #### CH341_CMD_UIO_STREAM (0xAB)
 **USB Endpoint:** BULK_OUT (command+data) → BULK_IN (optional response)  
-**Description:** Multi-function command for GPIO manipulation, SPI transfers, and I²C transactions. Uses 3-byte subcommand structure.  
+**Description:** Unified interface for GPIO and SPI operations  
 
 **Subcommands:**  
 
@@ -216,115 +268,26 @@ Use `CH341_CMD_UIO_STREAM (0xAB 0x80)` with masks:
 
 **No Response**
 
-##### SPI_STM_CS (0x3?)
-**Description:** SPI Chip Select Control  
-| Byte | Value | Field       | Description               |
-|------|-------|-------------|---------------------------|
-| 0    | 0xAB  | Stream Code | Always 0xAB               |
-| 1    | 0x3?  | Subcommand  | Chip select control:<br>- 0x30: All CS inactive<br>- 0x31: CS via D1<br>- 0x32: CS via D2<br>- 0x33: CS via D4<br>*Only bits [1:0] determine chip select* |
-| 2    | 0x??  | CS Pattern  | Unused (driver sets CS via subcommand) |
-
-**No Response**
-
-##### SPI_STM_DATA (0xA8)
-**Description:** SPI Transfer  
-| Byte | Value | Field        | Description          |
-|------|-------|--------------|----------------------|
-| 0    | 0xAB  | Stream Code  | Always 0xAB          |
-| 1    | 0xA8  | Subcommand   | SPI data transfer    |
-| 2    | 0x??  | Data Byte 1  | First SPI data byte  |
-| ...  | ...   | ...          | Up to 32 bytes       |
-
-**Response:**  
-| Byte | Bit Range | Field   | Description      |
-|------|-----------|---------|------------------|
-| 0    | [7:0]     | Data Byte 1 | MISO data (if connected) |
-| ...  | ...       | ...     | Matches TX length |
-
-##### I2C_STM_DELAY (0xA1)
-**Description:** Add I²C microsecond delay  
-*requires 2nd 0xAB 0xA1 command for MSB*    
-| Byte | Value | Field       | Description        |
-|------|-------|-------------|--------------------|
-| 0    | 0xAB  | Stream Code | Always 0xAB        |
-| 1    | 0xA1  | Subcommand  | I²C delay start    |
-| 2    | 0x??  | Delay LSB   | 8 of 16-bit delay value (LSB-first) |
-
-**No Response**  
-
-**Notes:**  
-- **I²C Timing:** Delay value = (Byte 2 of second 0xA1 command × 256) + Byte 2 of first 0xA1 command  
-  `0xAB 0xA1 [Delay_LSB] → 0xAB 0xA1 [Delay_MSB]`  
-  Total delay = (MSB×256 + LSB) μs  
-
-##### I2C_STM_READ (0xB?)
-**Description:** I²C Read N bytes (requires prior address write)  
-| Byte | Value | Field      | Description          |
-|------|-------|------------|----------------------|
-| 0    | 0xAB  | Stream Code| Always 0xAB          |
-| 1    | 0xB?  | Subcommand | 0xB0 + N (bytes to read) |
-| 2    | 0x??  | Unused     | Must be 0x00        |
-
-**Response:**  
-| Byte | Bit Range | Field    | Description         |
-|------|-----------|----------|---------------------|
-| 0    | [7:0]     | Data Byte 1 | First I²C response byte |
-| ...  | ...       | ...      | N total bytes       |
-
-##### I2C_STM_STOP (0xA2)
-**Description:** I²C Stop Condition  
-| Byte | Value | Field        | Description      |
-|------|-------|--------------|------------------|
-| 0    | 0xAB  | Stream Code  | Always 0xAB      |
-| 1    | 0xA2  | Subcommand   | I²C stop          |
-| 2    | 0x00  | Unused      | Must be 0x00     |
-
-**No Response**
-
-#### **Implementation Notes:**  
-- SPI transfers require 0xAB 0xA8 [Data...] sequence  
-- I²C uses 0xAB 0xA1/0xB?/0xA2 for protocol control  
-- GPIO stream ends with `0xAB 0x20 [Unused]`  
-- All data uses LSB-first byte packing  
-
-**Example Subcommand Sequence:**
-**SPI Write 4 Bytes:**  
-`[0xAB 0xA8 0x11] [0xAB 0xA8 0x22] [0xAB 0xA8 0x33] [0xAB 0xA8 0x44] [0xAB 0x20 0x00]`  
-Sends 0x11, 0x22, 0x33, 0x44 via SPI  
-
-**I²C Read 2 Bytes:**  
-`[0xAB 0xA1 0x05] [0xAB 0xA1 0x00] [0xAB 0xB2 0x00] → [Response Data: 0xAA 0xBB]`  
-Reads 2 bytes with 5μs delay  
-
 ---
 
 #### Interrupt Handling
 **INT# Pin:**  
 - Active-low hardware interrupt  
-- Requires driver configuration through `CH34x_START_IRQ_TASK` ioctl  
 
 **GPIO Interrupts:**  
-- Enabled via 0xA1 command's direction mask  
+- Enabled via 0xAB 0x40 command's direction mask  
 - Bit 5 (interrupt enable) and bit 3 (trigger status) in interrupt buffer  
 
 ---
 
 ### Notes
 - All multi-byte values use little-endian format  
-- MEM mode uses 32-byte bulk transfers  
-- SPI supports 1-32 byte transfers with optional CS control  
-- I²C requires 3-byte command sequences for transactions  
 - Output-only pins: RESET# (16), WRITE# (17), SCL (18), SDA (29)  
 
 **Status Flags:**  
 - BUSY/WAIT# indicates active transfer  
 - DATAS#/AUTOFD# polarity depends on interface configuration  
 - ERR# shows hardware fault condition  
-
-**Driver Support:**  
-- Verified against driver v1.5 (2024.12)  
-- Supports CH341/CH347/CH339/CH346 variants  
-- Requires 16-byte alignment for bulk transfers in EPP/MEM modes  
 
 **Maximum Values:**  
 - EPP/MEM transfers: 31 bytes  
