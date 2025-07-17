@@ -8,7 +8,7 @@
 - EPP/MEM transfers: 31 bytes  
 - SPI transfers: 32 bytes  
 - I²C addresses: 2-byte (EEPROM >256 bytes)  
-- Interrupt detection: 8 GPIO channels  
+- Interrupt detection: 8 GPIO channels  (CH347 only) 
 
 ---
 
@@ -31,135 +31,83 @@
 **USB Endpoint:** USB Control OUT  
 **Description:** Initializes parallel port mode (EPP or MEM).  
 **Parameters:**  
-| Byte | Value       | Description               |
-|------|-------------|---------------------------|
-| 0    | 0xB1 | Command code |
-| 1    | 0x00/0x02 | Mode low byte:<br>- 0x00: EPP Mode<br>- 0x02: MEM Mode |
-| 2    | 0x00 | Mode high byte |
+| Byte | Value          | Description  |
+|------|----------------|--------------|
+| 0    | 0xB1           | Command code |
+| 1    | 0x00/0x01/0x02 | Mode:<br>- 0x00/0x01: EPP Mode<br>- 0x02: MEM Mode |
+| 2    | 0x02           | Fixed value  |
 
 ---
 
 #### CMD_GET_STATUS (0xA0)
-**USB Endpoint:** BULK_OUT (1 byte command) → BULK_IN (3-byte response)  
+**USB Endpoint:** BULK_OUT (1 byte command) → BULK_IN (6-byte response)  
 **Description:** Reads parallel port status, GPIO states, and interface flags.  
 
 **Response Structure:**  
-| Byte | Bit Pos | Name   | Type   | Description                  |
-|------|---------|--------|--------|------------------------------|
-| 0    | [0-7]   | D[7:0] | GPIO   | Current state of data lines 0-7 |
-| 1    | 7       | ERR#   | Flag   | Error condition (0=OK, 1=Error) |
-|      | 8       | PEMP   | Flag   | Parallel port empty (0=Busy, 1=Ready) |
-|      | 9       | INT#   | Flag   | Interrupt pending (0=No,1=Yes)  |
-|      | 10      | SLCT   | Control | Chip select active (0=Inactive, 1=Active)   |
-| 2    | 8       | D[15:8]| GPIO   | Current state of data lines 15-8 |
-|      | 13      | WAIT#  | Control | Wait state (0=Busy, 1=Idle)          |
-|      | 14      | AUTOFD#    | I²C Only | Auto-feed status (I²C slave mode)    |
-|      |         | DATAS#     | SPI Only | Data strobe (SPI transfer active)    |
-|      | 15      | SLCTIN#    | I²C Only | Address strobe (I²C address phase)   |
-|      |         | ADDRS#     | SPI Only | SPI address/command phase            |
+| Byte | Bit | Pin | Description     |
+|------|-----|-----|-----------------|
+| 0    | 0   | D0  | CTS#, D0, CS0   |
+|      | 1   | D1  | DSR#, D1, CS1   |
+|      | 2   | D2  | RI#,  D2, CS2   |
+|      | 3   | D3  | DCD#, D3, DCK   |
+|      | 4   | D4  | OUT#, D4, DOUT2 |
+|      | 5   | D5  | DTR#, D5, DOUT  |
+|      | 6   | D6  | RTS#, D6, DIN2  |
+|      | 7   | D7  | SLP#, D7, DIN   |
+| 1    | 0   | D8  | TXD,  ERR#      |
+|      | 1   | D9  | RXD,  PEMP      |
+|      | 2   | D10 | INT#, ACK#      |
+|      | 3   | D11 | IN3,  SLCT      |
+|      | 4   | -   | Reserved        |
+|      | 5   | D13 | TEN#, BUSY, WAIT# |
+|      | 6   | D14 | ROV#, AFD#, DS# |
+|      | 7   | D15 | IN7,  SIN#, AS# |
+| 2    | 0   | D16 | TNOW, IN#, RST  |
+|      | 1   | D17 | RDY#, STB#, WR# |
+|      | 2   | D18 | SCL             |
+|      | 3   | D19 | SDA             |
+|      | [7:4] | - | Reserved        |
+| 3    | [7:0] | - | Reserved        |
+| 4    | [7:0] | - | Reserved        |
+| 5    | [7:0] | - | Reserved        |
 
-**Status Flags:**  
-- BUSY/WAIT# indicates active transfer  
-- DATAS#/AUTOFD# polarity depends on interface configuration  
-- ERR# shows hardware fault condition  
-
-**Clarifications:**  
-- **Bit Position** shows exact location within response byte (0 = least significant)  
-- **Name** uses standard hardware signal notation  
-- **Type** indicates signal category:  
-  - GPIO: Direct pin state read  
-  - Flag: Status indicator  
-  - Control: Bus control signal state  
-  - I²C Only: Only valid in I²C interface mode  
-  - SPI Only: Only valid in SPI interface mode  
-
-**Hardware Behavior:**  
-1. **Byte 0** contains raw GPIO values (D0=LSB, D7=MSB)  
-2. **Byte 1** contains critical status flags:  
-   - ERR# = 1 when hardware fault detected  
-   - PEMP = 1 when parallel port ready for next operation  
-   - INT# = 1 when GPIO interrupt pending  
-   - SLCT shows active chip selection  
-3. **Byte 2** contains:  
-   - Extended GPIO state (D15-D8) in bit 8  
-   - Mode-specific control signals:  
-     - WAIT# shows bus idle state  
-     - AUTOFD#/DATAS# polarity depends on interface mode  
-     - SLCTIN#/ADDRS# indicates protocol phase  
-     - ADDRS#/SLCTIN# polarity depends on interface
-
-**Implementation Details:**  
-- All status bits read as active-high logic (1=active)  
-- Unused bits [12:11] and [16:15] (SPI mode) remain reserved  
+**Notes:**  
+- Status: 0=low, 1=high
+- Available for both input and output direction pins
 - Interrupt detection requires prior configuration via SET_OUTPUT command  
-
-For example:  
-- If **Byte 1 = 0x05**, this means:  
-  - ERR#=0 (no error), PEMP=0 (busy), INT#=1 (interrupt pending), SLCT=0 (not selected)  
-- If **Byte 2 = 0x2A** in SPI mode, this shows:  
-  - D15=0, D14=0, D13=1, D12=0, D11=1, D10=0 (from bit 8)  
-  - WAIT#=0 (active), DATAS#=1 (data phase), ADDRS#=0 (command phase)
 
 ---
 
 #### CMD_SET_OUTPUT (0xA1)
 **USB Endpoint:** BULK_OUT (11 bytes)  
-**Description:** Configures GPIO direction and output states. First byte 0xA1, second byte 0x6A (fixed), third byte controls update masks.  
+**Description:** Configures GPIO direction and output states.
 
 **Parameters:**  
 | Byte | Value       | Field Name       | Description                          |
-|------|-------------|------------------|--------------------------------------|
-| 0    | 0xA1        | Command code     | Always 0xA1                          |
-| 1    | 0x6A        | Fixed value      | Required constant                    |
-| 2    | Mask        | Output Enable    | Selects GPIO banks for update:<br>**Bit 4**: GPIO [23:16] (controls RESET#, WRITE#, SCL, SDA)<br>**Bit 5**: GPIO [15:8]<br>**Bit 6**: GPIO [7:0]<br>(1=enable update, 0=no change) |
-| 3    | Data Byte 1 | GPIO Data [15:8] | Output values for GPIO 15-8 (LSB-first)|
-| 4    | Dir Byte 1  | GPIO Dir [15:8]  | Direction control:<br>**Bit [4:0]**: GPIO [15:11] direction (0=input, 1=output)<br>Bits [7:5] always 0x02 mask |
-| 5    | Data Byte 2 | GPIO Data [7:0]  | Output values for GPIO 7-0          |
-| 6    | Dir Byte 2  | GPIO Dir [7:0]  | Direction control:<br>**Bit [4:0]**: GPIO [7:3] direction<br>Bits [7:5] always 0x02 mask |
-| 7    | Data Byte 3 | GPIO Data [23:16]| Output values for GPIO 23-16        |
-| 8-10 | 0x00        | Padding          | Unused                               |
+|------|-------------|------------------|-----------------|
+| 0    | 0xA1        | Command code     | Always 0xA1     |
+| 1    | 0x6A        | Fixed value      | Always 0x6A     |
+| 2    | Mask        | Output Enable    | Selects GPIO banks for update:<br>- **bits [1:0]**: fixed to 0b11<br>- **bit 2**: 0b1 to update bytes 3-4<br>- **bit 3**: 0b1 to update bytes 5-6<br>- **bit 4**: 0b1 to set byte 7<br>- **bits [7:5]**: fixed to 0b000<br>(1=enable update, 0=no change) |
+| 3    | Data Byte 1 | GPIO Data [15:8] | Output values for D15-D8: 0=low, 1=high |
+| 4    | Dir Byte 1  | GPIO Dir [15:8]  | Direction control for D15-D8: 0=input, 1=output |
+| 5    | Data Byte 2 | GPIO Data [7:0]  | Output values for D7-D0: 0=low, 1=high |
+| 6    | Dir Byte 2  | GPIO Dir [7:0]   | Direction control for D7-D0: 0=input, 1=output |
+| 7    | Data Byte 3 | GPIO Data [19:16] | **bits [3:0]**: Output values for D19-D16 (output only pins)<br>**bits [7:4]**: padding |
+| 8-10 | 0x00        | Padding         | Unused   |
 
 **Output-Only Pins:**  
 | GPIO | Signal | Description          |
 |------|--------|----------------------|
 | 16   | RESET# | Active-low reset     |
 | 17   | WRITE# | Active-low write strobe |
-| 18   | SCL    | I²C clock line       |
-| 19   | SDA    | I²C data line        |
+| 18   | SCL    | Open-drain I²C clock line |
+| 19   | SDA    | Open-drain I²C data line |
 
 **Notes:**  
-1. Mask byte (Byte 2) controls **which GPIO banks** get updated, not individual bits:  
+1. Mask byte (Byte 2) controls **which GPIO banks** get updated, not individual bits:
+   - Bit 2 → Updates GPIO [15:8] (direction + data)
+   - Bit 3 → Updates GPIO [7:0] (direction + data)  
    - Bit 4 → Updates RESET#, WRITE#, SCL, SDA (always output)  
-   - Bit 5 → Updates GPIO [15:8] (direction + data)  
-   - Bit 6 → Updates GPIO [7:0] (direction + data)  
-
-2. Direction bytes use **internal 0x10 offset**:  
-   - For GPIO [15:8]: Only bits [4:0] of Dir Byte 1 affect pins [15:11]  
-   - For GPIO [7:0]: Only bits [4:0] of Dir Byte 2 affect pins [7:3]  
-   - Remaining bits always write 0x02 (matches driver implementation)  
-
-**Bit-to-Pin Mapping Consistency:**  
-- GET_STATUS returns GPIO [15:8] in **Byte 2, Bit 8**  
-- SET_OUTPUT writes GPIO [23:16] in **Byte 7** and controls their direction via **Mask Byte 2, Bit 4**  
-- GPIO [23:16] always operate as outputs but their state comes from:  
-  - Byte 7 (Data) for RESET#, WRITE#, etc.  
-  - Byte 3/4 (Data/Dir) for GPIO 19-16 (if enabled)  
-
-**Example Configuration:**  
-To set GPIO [7:0] as outputs and GPIO [23:16] to fixed values:  
-- Byte 2 = 0x30 (enable GPIO [7:0] + [23:16])  
-- Byte 3 = 0x00 (no change to GPIO [15:8])  
-- Byte 4 = 0x1F (set GPIO [15:11] as outputs - unused in practice)  
-- Byte 5 = 0xFF (set GPIO [7:0] to high)  
-- Byte 6 = 0x1F (set GPIO [7:3] as outputs)  
-- Byte 7 = 0x0F (set RESET#=0, WRITE#=1, SCL=0, SDA=1)  
-
-**Critical Notes:**  
-- GPIO [23:16] always operate as outputs but state comes from:  
-  - Byte 7 (Data) for RESET#/WRITE#/SCL/SDA  
-  - Byte 3/4 (Data/Dir) for GPIO [19:16] when enabled via Mask Byte 2, Bit 4  
-- GPIO [19:16] direction controlled by Mask Byte 2, Bit 4 but lack dedicated data bytes  
-- SDA (bit 19) and SCL (bit 18) only function in I²C mode
 
 ---
 
@@ -317,16 +265,15 @@ The END subcommand serves as a required terminator for all I²C operations. Its 
 
 ##### UIO_STM_IN (0x00)
 **Description:**  Read GPIO [7:0]  
-| Byte | Value | Field        | Description                   |
-|------|-------|--------------|-------------------------------|
-| 0    | 0xAB  | Stream Code  | Always 0xAB for subcommands   |
-| 1    | 0x00  | Subcommand   | GPIO input read               |
-| 2    | 0x??  | Read Mask    | Unused by hardware (driver filter only) |
+| Byte | Value | Field        | Description          |
+|------|-------|--------------|--------------------------------|
+| 0    | 0xAB  | Stream Code  | Always 0xAB for subcommands |
+| 1    | 0x00  | Subcommand   | GPIO input read           |
 
 **Response:**  
 | Byte | Bit Range | Field  | Description      |
 |------|-----------|--------|------------------|
-| 0    | [7:0]     | GPIO[7:0] | Current pin states |
+| 0    | [7:0]     | GPIO[7:0] | Current state of D7-D0 lines |
 
 ##### UIO_STM_DIR (0x40)
 **Description:** Sets GPIO direction.  
@@ -353,8 +300,8 @@ The END subcommand serves as a required terminator for all I²C operations. Its 
 | Byte | Value | Field        | Description          |
 |------|-------|--------------|----------------------|
 | 0    | 0xAB  | Stream Code  | Always 0xAB          |
-| 1    | 0x20  | Subcommand   | End sequence         |
-| 2    | 0x00  | Unused      | Must be 0x00         |
+| ..   | ..    | ..           | Other subcommands and parameters |
+| N    | 0x20  | Subcommand   | End sequence         |
 
 **No Response**
 
@@ -365,7 +312,7 @@ The END subcommand serves as a required terminator for all I²C operations. Its 
 Supports hardware interrupts on one configurable GPIO pin. Key configuration parameters:
 
 **Hardware Interrupt Pin**  
-- Only GPIO 19 (D4) supports hardware interrupts  
+- Only --GPIO 19 (D4)-- supports hardware interrupts  
 - Must be configured as input in board configuration  
 - Requires external pull-up resistor  
 
@@ -375,10 +322,10 @@ Supports hardware interrupts on one configurable GPIO pin. Key configuration par
 
 **Configuration Requirements**  
 - Enable interrupt detection via `CH341_CMD_SET_OUTPUT` or `CH341_CMD_UIO_STREAM UIO_STM_OUT` command's direction mask  
-- Configure target GPIO as input (Bit 5=1 in direction mask)  
+- Configure target GPIO as input (--Bit 5=1-- in direction mask)  
 - Use interrupt buffer status bits:  
-  - Bit 5: Interrupt enable (1=active)  
-  - Bit 3: Trigger status (1=pending interrupt)  
+  - --Bit 5--: Interrupt enable (1=active)  
+  - --Bit 3--: Trigger status (1=pending interrupt)  
 
 **Hardware Limitations**  
 - Only one GPIO can generate hardware interrupts  
@@ -386,7 +333,7 @@ Supports hardware interrupts on one configurable GPIO pin. Key configuration par
 - Interrupts share bandwidth with normal USB transfers  
 
 **Software interrupts**
-- Software polling for GPIOs 0-7 and 15-18 can be implemented if needed.
+- Software polling for GPIOs 0-15 can be implemented if needed.
 
 ---
 
