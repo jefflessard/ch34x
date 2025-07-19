@@ -4,6 +4,8 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/of.h>
+#include <linux/of_platform.h>
 #include <linux/gpio/driver.h>
 #include <linux/usb.h>
 #include <linux/mutex.h>
@@ -215,7 +217,7 @@ static int ch341_control_read(struct ch341_device *ch341, u8 request,
 {
 	int ret;
 	
-	ret = usb_control_msg(ch341->udev, 
+	ret = usb_control_msg(ch341->udev,
 			      usb_rcvctrlpipe(ch341->udev, 0), request,
 			      USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 			      value, index, data, size, CH341_DEFAULT_TIMEOUT);
@@ -231,7 +233,7 @@ static int __maybe_unused ch341_control_write(struct ch341_device *ch341, u8 req
 {
 	int ret;
 	
-	ret = usb_control_msg(ch341->udev, 
+	ret = usb_control_msg(ch341->udev,
 			      usb_sndctrlpipe(ch341->udev, 0), request,
 			      USB_DIR_OUT | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 			      value, index, data, size, CH341_DEFAULT_TIMEOUT);
@@ -300,8 +302,8 @@ static int ch341_gpio_get_status(struct ch341_device *ch341, u32 *status)
 	if (ret < 0)
 		return ret;
 
-	*status = ((buf[2] & CH341_GPIO_B2) << 16) | 
-		  ((buf[1] & CH341_GPIO_B1) << 8) | 
+	*status = ((buf[2] & CH341_GPIO_B2) << 16) |
+		  ((buf[1] & CH341_GPIO_B1) << 8) |
 		   (buf[0] & CH341_GPIO_B0);
 
 	return 0;
@@ -456,7 +458,7 @@ static int ch341_gpio_set_rv(struct gpio_chip *chip, unsigned int offset, int va
 	long unsigned int pin_mask = BIT(offset),
 			  pin_bits = value ? pin_mask : 0;
 
-	return ch341_gpio_set_multiple_rv(chip, &pin_mask, &pin_bits); 
+	return ch341_gpio_set_multiple_rv(chip, &pin_mask, &pin_bits);
 }
 
 static void ch341_gpio_set(struct gpio_chip *chip, unsigned int offset, int value)
@@ -479,9 +481,47 @@ static int ch341_gpio_init_valid_mask(struct gpio_chip *chip,
 }
 
 /* GPIO chip registration */
+static struct fwnode_handle *ch341_find_fwnode(struct usb_device *udev)
+{
+    struct usb_device *parent = udev->parent;
+    struct fwnode_handle *usb_controller_fwnode;
+    struct fwnode_handle *child_fwnode;
+    const char *node_compatible;
+    char *expected_compatible;
+    int ret;
+
+    if (!parent)
+        return NULL;
+
+    // Get the USB controller's fwnode
+    usb_controller_fwnode = dev_fwnode(&parent->dev);
+    if (!usb_controller_fwnode)
+        return NULL;
+
+    expected_compatible = kasprintf(GFP_KERNEL, "usb%04x,%04x",
+                                   le16_to_cpu(udev->descriptor.idVendor),
+                                   le16_to_cpu(udev->descriptor.idProduct));
+    if (!expected_compatible)
+        return NULL;
+
+    // Look for child nodes with matching compatible string
+    fwnode_for_each_child_node(usb_controller_fwnode, child_fwnode) {
+	dev_info(&udev->dev, "checking %s", fwnode_get_name(child_fwnode));
+	ret = fwnode_device_is_compatible(child_fwnode, expected_compatible);
+        if (ret) {
+            kfree(expected_compatible);
+            return fwnode_handle_get(child_fwnode);
+        }
+    }
+
+    kfree(expected_compatible);
+    return NULL;
+}
+
 int ch341_gpio_probe(struct ch341_device *ch341)
 {
 	struct gpio_chip *gpio_chip = &ch341->gpio_chip;
+	struct fwnode_handle *fwnode;
 	int ret;
 
 	/* Initialize GPIO chip structure */
@@ -522,21 +562,50 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 		return ret;
 	}
 
+	/* Look for USB device tree node */
+	fwnode = ch341_find_fwnode(ch341->udev);
+	if (fwnode) {
+		gpio_chip->fwnode = fwnode;
+		dev_info(CH341_DEV, "Found USB device tree configuration\n");
+	} else {
+		dev_info(CH341_DEV, "No USB device tree configuration found\n");
+	}
+
 	/* Register GPIO chip */
 	ret = devm_gpiochip_add_data(CH341_DEV, gpio_chip, ch341);
 	if (ret) {
 		dev_err(CH341_DEV, "Failed to register GPIO chip: %d\n", ret);
+		if (fwnode)
+			fwnode_handle_put(fwnode);
 		return ret;
 	}
 
-	dev_info(CH341_DEV, "CH341 GPIO chip registered with %d pins\n", 
+	dev_info(CH341_DEV, "CH341 GPIO chip registered with %d pins\n",
 			gpio_chip->ngpio);
+
+	if (fwnode) {
+		// Populate DT children (e.g. spi-gpio)
+		ret = of_platform_populate(to_of_node(fwnode), NULL, NULL, CH341_DEV);
+		if (ret)
+			dev_warn(CH341_DEV, "Failed to populate child devices: %d\n", ret);
+	}
 
 	return 0;
 }
 
 void ch341_gpio_remove(struct ch341_device *ch341)
 {
+	struct fwnode_handle *fwnode = ch341->gpio_chip.fwnode;
+
+	dev_info(CH341_DEV, "Unregistering gpio chip");
+
+	if (fwnode) {
+		dev_info(CH341_DEV, "Unregistering child devices");
+		// Remove child devices created by of_platform_populate
+		of_platform_depopulate(CH341_DEV);
+
+		fwnode_handle_put(fwnode);
+	}
 }
 
 static int ch341_probe(struct usb_interface *interface,

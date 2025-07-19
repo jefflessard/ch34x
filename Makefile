@@ -1,6 +1,5 @@
 MODULE_NAME = ch341-gpio
 obj-m += ch341-gpio.o
-INSTALL_MOD_PATH ?= /
 
 # Path to the kernel source tree
 KDIR ?= /lib/modules/$(shell uname -r)/build
