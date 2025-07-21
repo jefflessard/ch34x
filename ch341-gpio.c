@@ -8,12 +8,13 @@
 #include <linux/of_platform.h>
 #include <linux/gpio/driver.h>
 #include <linux/usb.h>
-#include <linux/mutex.h>
 #include <linux/slab.h>
+#include <linux/i2c.h>
+#include <linux/spi/spi.h>
 
 #define DRIVER_NAME "ch341-gpio"
 #define CH341_DEFAULT_TIMEOUT	1000
-#define CH341_RX_BUFFER_LEN	32
+#define CH341_RX_BUFFER_LEN	1000
 
 /* Control Commands */
 #define CH341_CTRL_VERSION	0x5F
@@ -21,13 +22,35 @@
 #define CH341_CTRL_DEBUG_WRITE	0x9A
 
 /* CH341 Commands */
-#define CH341_CMD_GET_STATUS    0xa0
-#define CH341_CMD_SET_OUTPUT    0xa1
-#define CH341_CMD_UIO_STREAM    0xab
-#define CH341_CMD_UIO_STM_IN    0x00
-#define CH341_CMD_UIO_STM_END   0x20
-#define CH341_CMD_UIO_STM_DIR   0x40
-#define CH341_CMD_UIO_STM_OUT   0x80
+#define CH341_CMD_GET_STATUS    0xA0
+#define CH341_CMD_SET_OUTPUT    0xA1
+
+#define CH341_CMD_SPI_STREAM	0xA8
+
+#define CH341_CMD_I2C_STREAM	0xAA
+#define CH341_I2C_STM_US	0x40
+#define CH341_I2C_STM_MS	0x50
+#define CH341_I2C_STM_SET	0x60
+#define CH341_I2C_STM_STA	0x74
+#define CH341_I2C_STM_STO	0x75
+#define CH341_I2C_STM_OUT	0x80
+#define CH341_I2C_STM_IN	0xC0
+#define CH341_I2C_STM_END	0x00
+
+#define CH341_CMD_UIO_STREAM    0xAB
+#define CH341_UIO_STM_IN	0x00
+#define CH341_UIO_STM_END	0x20
+#define CH341_UIO_STM_DIR	0x40
+#define CH341_UIO_STM_OUT	0x80
+#define CH341_UIO_STM_US	0xc0
+
+/* SPI Pins */
+#define CH341_CS0	BIT(0)
+#define CH341_CS1	BIT(1)
+#define CH341_CS2	BIT(2)
+#define CH341_DCK	BIT(3)
+#define CH341_DOUT2	BIT(4)
+#define CH341_DOUT	BIT(5)
 
 /* Output-only pins */
 #define CH341_GPIO_OUT_B0   GENMASK(7, 0)
@@ -46,9 +69,6 @@
 #define CH341_GPIO_B1   (CH341_GPIO_OUT_B1 | CH341_GPIO_IN_B1)
 #define CH341_GPIO_B2   (CH341_GPIO_OUT_B2 | CH341_GPIO_IN_B2)
 #define CH341_GPIO_MASK (CH341_GPIO_OUT_MASK | CH341_GPIO_IN_MASK)
-
-#define CH341_GPIO_SPI_MASK  (BIT(3) | BIT(5) | BIT(7))
-#define CH341_GPIO_I2C_MASK  (BIT(18) | BIT(19))
 
 #define CH341_DEV (&ch341->intf->dev)
 
@@ -79,6 +99,8 @@ struct ch341_device {
 	struct usb_device *udev;
 	struct usb_interface *intf;
 	struct gpio_chip gpio_chip;
+	struct spi_controller *spi_ctlr;
+	struct i2c_adapter i2c;
 
 	/* USB transfer pipes */
 	unsigned int tx_pipe;
@@ -87,10 +109,38 @@ struct ch341_device {
 	/* GPIO state tracking */
 	u32 gpio_mask;  /* Direction: 1=output, 0=input */
 	u32 gpio_data;  /* Current pin values */
+	u32 spi_mask; /* Reserved SPI pins */
 
 	/* IC version for compatibility */
 	u16 ic_version;
 };
+
+/* fwnode helper functions */
+static struct fwnode_handle* ch341_get_compatible_fwnode(struct ch341_device *ch341, const char *compatible)
+{
+	struct fwnode_handle *child, *result;
+	int avail_count = 0;
+
+	if (!CH341_DEV->fwnode)
+		return NULL;
+
+	fwnode_for_each_child_node(CH341_DEV->fwnode, child) {
+		if (fwnode_device_is_compatible(child, compatible)) {
+			if (fwnode_device_is_available(child))
+				avail_count++;
+
+			if (avail_count > 1) {
+				dev_warn(CH341_DEV, "Multiple %s not supported\n", compatible);
+				fwnode_handle_put(child);
+				return NULL;
+			}
+
+			result = child;
+		}
+	}
+
+	return fwnode_handle_get(result);
+}
 
 /* USB transfer helper functions */
 static void ch341_usb_tx_complete(struct urb *urb)
@@ -248,26 +298,6 @@ static int ch341_init_device(struct ch341_device *ch341)
 {
 	int ret;
 
-#if 0
-	u8 mode = 2;
-	u16 mode_cmd = (mode << 8) | mode;
-	u16 init_cmd = (mode << 8) | 0x02;
-
-	/* Set mode */
-	ret = ch341_control_write(ch341, CH341_CTRL_DEBUG_WRITE, 0x2525, mode_cmd, NULL, 0);
-	if (ret < 0) {
-		dev_err(CH341_DEV, "Failed to write mode\n");
-		return ret;
-	}
-
-	/* Initialize mode */
-	ret = ch341_control_write(ch341, CH341_CTRL_PARA_INIT, init_cmd, 0, NULL, 0);
-	if (ret < 0) {
-		dev_err(CH341_DEV, "Device initialization failed\n");
-		return ret;
-	}
-#endif
-
 	/* Get device version */
 	ret = ch341_control_read(ch341, CH341_CTRL_VERSION, 0, 0,
 				 &ch341->ic_version, sizeof(ch341->ic_version));
@@ -283,6 +313,222 @@ static int ch341_init_device(struct ch341_device *ch341)
 	return 0;
 }
 
+ /* ==============================
+ * 2. SPI controller implementation
+ * ============================== */
+
+static void ch341_spi_set_cs(struct spi_device *spi, bool enable)
+{
+	struct ch341_device *ch341 = spi_controller_get_devdata(spi->controller);
+	u32 out_data, cs_mask;
+	u8 cmd[4];
+	int ret;
+
+	dev_dbg(CH341_DEV, "%s %d %d\n", __func__, spi_get_chipselect(spi, 0), enable);
+
+	out_data = (1 << spi->controller->num_chipselect) - 1;
+
+	if (spi->mode & ~SPI_NO_CS) {
+		cs_mask = BIT(spi_get_chipselect(spi, 0));
+		if (enable) {
+			out_data |= cs_mask;
+		} else {
+			out_data &= ~cs_mask;
+		}
+	}
+
+	out_data &= ch341->spi_mask;
+
+	u32 old_data = set_mask_bits(&ch341->gpio_data, ch341->spi_mask, out_data);
+
+	cmd[0] = CH341_CMD_UIO_STREAM;
+	cmd[2] = CH341_UIO_STM_DIR | ch341->gpio_mask;
+	cmd[1] = CH341_UIO_STM_OUT | ch341->gpio_data & 0x3f;
+	cmd[3] = CH341_UIO_STM_END;
+
+	ret = ch341_usb_transfer(ch341, cmd, sizeof(cmd), NULL, 0);
+	if (ret < 0)
+		dev_err(CH341_DEV, "Failed to set SPI CS: %d\n", ret);
+}
+
+static int ch341_spi_prepare_message(struct spi_controller *ctlr, struct spi_message *msg)
+{
+	struct ch341_device *ch341 = spi_controller_get_devdata(msg->spi->controller);
+
+	dev_dbg(CH341_DEV, "%s %x\n", __func__, msg->spi->mode);
+
+	u32 pin_mask = BIT(CH341_DCK);
+	u32 pin_data = msg->spi->mode & SPI_CPOL ? pin_mask : 0;
+
+	u32 old_data = set_mask_bits(&ch341->gpio_data, pin_mask, pin_data);
+
+	return 0;
+}
+
+static int ch341_spi_unprepare_message(struct spi_controller *ctlr, struct spi_message *msg)
+{
+	struct ch341_device *ch341 = spi_controller_get_devdata(msg->spi->controller);
+
+	dev_dbg(CH341_DEV, "%s\n", __func__);
+
+	return 0;
+}
+
+static int ch341_spi_transfer_one(struct spi_controller *ctlr,
+				  struct spi_device *spi,
+				  struct spi_transfer *xfer)
+{
+	struct ch341_device *ch341 = spi_controller_get_devdata(ctlr);
+	u32 cmd_len = xfer->len + 1;
+	u8 *cmd;
+	int ret;
+
+	dev_dbg(CH341_DEV, "%s %d\n", __func__, xfer->len);
+
+	cmd = kzalloc(cmd_len, GFP_KERNEL);
+	if (!cmd)
+		return -ENOMEM;
+
+	cmd[0] = CH341_CMD_SPI_STREAM;
+	if (xfer->tx_buf) {
+		if (spi->mode & SPI_LSB_FIRST) {
+			memcpy(&cmd[1], xfer->tx_buf, xfer->len);
+		} else {
+			//TODO implement nibble swap
+			dev_err(CH341_DEV, "MSB first nibbles not implemented\n");
+			kfree(cmd);
+			return -EINVAL;
+		}
+	}
+
+	ret = ch341_usb_transfer(ch341, cmd, cmd_len, xfer->rx_buf, xfer->len);
+	kfree(cmd);
+
+/* TODO
+ * return 1 if the transfer is still in progress. When
+ * the driver is finished with this transfer it must
+ * call spi_finalize_current_transfer() so the subsystem
+ * can issue the next transfer. If the transfer fails, the
+ * driver must set the flag SPI_TRANS_FAIL_IO to
+ * spi_transfer->error first, before calling
+ * spi_finalize_current_transfer().
+ */
+	return ret < 0 ? ret : 0;
+}
+
+static int ch341_spi_probe(struct ch341_device *ch341)
+{
+	struct spi_controller *ctlr;
+	struct fwnode_handle *fwnode;
+	int ret;
+
+	fwnode = ch341_get_compatible_fwnode(ch341, "wch,ch341-spi");
+	if (fwnode && !fwnode_device_is_available(fwnode)) {
+		dev_info(CH341_DEV, "SPI controller disabled\n");
+		return 0;
+	}
+
+	ctlr = devm_spi_alloc_host(CH341_DEV, 0);
+	if (!ctlr)
+		return -ENOMEM;
+
+	ctlr->dev.fwnode = fwnode;
+	if (fwnode && is_of_node(fwnode)) {
+		ctlr->dev.of_node = to_of_node(fwnode);
+	}
+	// TODO bitbanged streaming protocol: SPI_CPOL | SPI_3WIRE
+	// TODO hardware supported: SPI_CS_HIGH | SPI_LSB_FIRST | SPI_NO_CS | SPI_TX_DUAL | SPI_RX_DUAL;
+	// ctlr->mode_bits = SPI_MODE_0;
+	// ctlr->mode_bits = SPI_MODE_3 | SPI_LSB_FIRST | SPI_CS_HIGH;
+	ctlr->mode_bits = SPI_CPOL | SPI_CPHA | SPI_LSB_FIRST;
+	ctlr->flags = SPI_CONTROLLER_MUST_RX | SPI_CONTROLLER_MUST_TX;
+#if 0
+	ctlr->flags |= SPI_CONTROLLER_MULTI_CS;
+#endif
+	ctlr->bits_per_word_mask = SPI_BPW_MASK(8);
+	ctlr->min_speed_hz = 400;
+	ctlr->max_speed_hz = 1e6;
+	ctlr->num_chipselect = 3; // TODO dynamic DT
+	ctlr->set_cs = ch341_spi_set_cs;
+	ctlr->prepare_message = ch341_spi_prepare_message;
+	ctlr->unprepare_message = ch341_spi_unprepare_message;
+	ctlr->transfer_one = ch341_spi_transfer_one;
+	spi_controller_set_devdata(ctlr, ch341);
+	ch341->spi_ctlr = ctlr;
+
+	ch341->spi_mask = GENMASK(5, 0) & ~CH341_DOUT2;
+	u32 old_mask = set_mask_bits(&ch341->gpio_mask, ch341->spi_mask, ch341->spi_mask);
+	u32 old_data = set_mask_bits(&ch341->gpio_data, ch341->spi_mask, (1 << ctlr->num_chipselect) - 1);
+
+	ret = devm_spi_register_controller(CH341_DEV, ctlr);
+	if (ret)
+		return ret;
+
+	dev_info(CH341_DEV, "SPI registered with %d chip selects\n", ctlr->num_chipselect);
+	return 0;
+}
+
+static void ch341_spi_remove(struct ch341_device *ch341)
+{
+	struct fwnode_handle *fwnode = ch341->spi_ctlr->dev.fwnode;
+
+	if (fwnode)
+		fwnode_handle_put(fwnode);
+}
+
+/* ==============================
+ * 3. I2C adapter implementation
+ * ============================== */
+// TODO implement I2C
+#if 0
+static int ch341_i2c_master_xfer(struct i2c_adapter *adap,
+				 struct i2c_msg *msgs, int num)
+{
+	struct ch341_device *ch341 = i2c_get_adapdata(adap);
+	int i, ret = 0;
+
+	for (i = 0; i < num; i++) {
+		struct i2c_msg *msg = &msgs[i];
+		u8 cmd[4];
+
+		cmd[0] = 0xB0; /* Hypothetical CH34x I2C Transfer Command */
+		cmd[1] = msg->addr << 1;
+		cmd[2] = msg->len;
+
+		ret = ch341_usb_transfer(ch341, cmd, 3);
+	}
+
+	return ret ? ret : num;
+}
+
+static u32 ch341_i2c_func(struct i2c_adapter *adap)
+{
+	return I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL;
+}
+
+static const struct i2c_algorithm ch341_i2c_algo = {
+	.master_xfer = ch341_i2c_master_xfer,
+	.functionality = ch341_i2c_func,
+};
+
+static int ch341_i2c_probe(struct ch341_device *ch341)
+{
+	int ret;
+
+	ch341->i2c.owner = THIS_MODULE;
+	ch341->i2c.algo = &ch341_i2c_algo;
+	ch341->i2c.dev.parent = &ch341->udev->dev;
+
+	i2c_set_adapdata(&ch341->i2c, ch341);
+
+	ret = i2c_add_adapter(&ch341->i2c);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+#endif
+
 /* CH341a GPIO commands */
 /* Get current status of all pins */
 static int ch341_gpio_get_status(struct ch341_device *ch341, u32 *status)
@@ -290,12 +536,6 @@ static int ch341_gpio_get_status(struct ch341_device *ch341, u32 *status)
 	u8 cmd[1];
 	u8 buf[6];
 	int ret;
-
-#if 0
-	cmd[0] = CH341_CMD_UIO_STREAM;
-	cmd[1] = CH341_CMD_UIO_STM_IN;
-	cmd[2] = CH341_CMD_UIO_STM_END;
-#endif
 
 	cmd[0] = CH341_CMD_GET_STATUS;
 	ret = ch341_usb_transfer(ch341, cmd, sizeof(cmd), buf, sizeof(buf));
@@ -466,7 +706,6 @@ static void ch341_gpio_set(struct gpio_chip *chip, unsigned int offset, int valu
 	ch341_gpio_set_rv(chip, offset, value);
 }
 
-
 static void ch341_gpio_set_multiple(struct gpio_chip *chip, unsigned long *mask, unsigned long *bits)
 {
 	ch341_gpio_set_multiple_rv(chip, mask, bits);
@@ -476,58 +715,39 @@ static int ch341_gpio_init_valid_mask(struct gpio_chip *chip,
 				      unsigned long *valid_mask,
 				      unsigned int ngpios)
 {
+	struct ch341_device *ch341 = gpiochip_get_data(chip);
+
+	dev_dbg(CH341_DEV, "%s %lx %d\n", __func__, *valid_mask, ngpios);
+
+	if (ngpios != ch341->gpio_chip.ngpio)
+		return -EINVAL;
+
 	*valid_mask = CH341_GPIO_MASK;
+	*valid_mask &= ~ch341->spi_mask;
+
 	return 0;
 }
 
 /* GPIO chip registration */
-static struct fwnode_handle *ch341_find_fwnode(struct usb_device *udev)
-{
-    struct usb_device *parent = udev->parent;
-    struct fwnode_handle *usb_controller_fwnode;
-    struct fwnode_handle *child_fwnode;
-    const char *node_compatible;
-    char *expected_compatible;
-    int ret;
-
-    if (!parent)
-        return NULL;
-
-    // Get the USB controller's fwnode
-    usb_controller_fwnode = dev_fwnode(&parent->dev);
-    if (!usb_controller_fwnode)
-        return NULL;
-
-    expected_compatible = kasprintf(GFP_KERNEL, "usb%04x,%04x",
-                                   le16_to_cpu(udev->descriptor.idVendor),
-                                   le16_to_cpu(udev->descriptor.idProduct));
-    if (!expected_compatible)
-        return NULL;
-
-    // Look for child nodes with matching compatible string
-    fwnode_for_each_child_node(usb_controller_fwnode, child_fwnode) {
-	dev_info(&udev->dev, "checking %s", fwnode_get_name(child_fwnode));
-	ret = fwnode_device_is_compatible(child_fwnode, expected_compatible);
-        if (ret) {
-            kfree(expected_compatible);
-            return fwnode_handle_get(child_fwnode);
-        }
-    }
-
-    kfree(expected_compatible);
-    return NULL;
-}
-
 int ch341_gpio_probe(struct ch341_device *ch341)
 {
 	struct gpio_chip *gpio_chip = &ch341->gpio_chip;
 	struct fwnode_handle *fwnode;
 	int ret;
 
+	fwnode = ch341_get_compatible_fwnode(ch341, "wch,ch341-gpio");
+	if (fwnode && !fwnode_device_is_available(fwnode)) {
+		dev_info(CH341_DEV, "GPIO controller disabled\n");
+		return 0;
+	}
+
+	// TODO parse gpio fwnode properties?
+
 	/* Initialize GPIO chip structure */
 	gpio_chip->label = "ch341-gpio";
 	gpio_chip->parent = CH341_DEV;
 	gpio_chip->owner = THIS_MODULE;
+	gpio_chip->fwnode = fwnode;
 	gpio_chip->base = -1;  /* Dynamic allocation */
 	gpio_chip->ngpio = fls(CH341_GPIO_MASK);
 	gpio_chip->names = ch341_pin_names;
@@ -548,9 +768,7 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 	gpio_chip->set_multiple_rv = ch341_gpio_set_multiple_rv;
 #endif
 
-	/* Initialize GPIO state */
-	ch341->gpio_mask = CH341_GPIO_OUT_MASK;
-	ch341->gpio_data = 0;   /* All pins default to low */
+	/* Sync GPIO state */
 	ret = ch341_gpio_write_outputs(ch341, ch341->gpio_mask, ch341->gpio_data);
 	if (ret < 0) {
 		dev_err(CH341_DEV, "Failed to set default state: %d\n", ret);
@@ -562,21 +780,10 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 		return ret;
 	}
 
-	/* Look for USB device tree node */
-	fwnode = ch341_find_fwnode(ch341->udev);
-	if (fwnode) {
-		gpio_chip->fwnode = fwnode;
-		dev_info(CH341_DEV, "Found USB device tree configuration\n");
-	} else {
-		dev_info(CH341_DEV, "No USB device tree configuration found\n");
-	}
-
 	/* Register GPIO chip */
 	ret = devm_gpiochip_add_data(CH341_DEV, gpio_chip, ch341);
 	if (ret) {
 		dev_err(CH341_DEV, "Failed to register GPIO chip: %d\n", ret);
-		if (fwnode)
-			fwnode_handle_put(fwnode);
 		return ret;
 	}
 
@@ -584,7 +791,7 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 			gpio_chip->ngpio);
 
 	if (fwnode) {
-		// Populate DT children (e.g. spi-gpio)
+		/* Populate DT children (e.g. spi-gpio) */
 		ret = of_platform_populate(to_of_node(fwnode), NULL, NULL, CH341_DEV);
 		if (ret)
 			dev_warn(CH341_DEV, "Failed to populate child devices: %d\n", ret);
@@ -597,15 +804,72 @@ void ch341_gpio_remove(struct ch341_device *ch341)
 {
 	struct fwnode_handle *fwnode = ch341->gpio_chip.fwnode;
 
-	dev_info(CH341_DEV, "Unregistering gpio chip");
-
 	if (fwnode) {
-		dev_info(CH341_DEV, "Unregistering child devices");
-		// Remove child devices created by of_platform_populate
+		dev_info(CH341_DEV, "Unregistering child devices\n");
+		/* Remove child devices created by of_platform_populate */
 		of_platform_depopulate(CH341_DEV);
-
 		fwnode_handle_put(fwnode);
 	}
+}
+
+/* USB topology matching */
+static bool ch341_usb_instance_matches(struct usb_device *udev, struct fwnode_handle *fwnode)
+{
+	u32 dt_port, dt_hub_tier;
+	int actual_hub_tier;
+
+	/* Check port number */
+	if (!fwnode_property_read_u32(fwnode, "usb-port", &dt_port)) {
+		if (dt_port != udev->portnum)
+			return false;
+	}
+
+	/* Check hub tier (0 = root hub, 1 = first tier, etc.) */
+	if (!fwnode_property_read_u32(fwnode, "usb-hub-tier", &dt_hub_tier)) {
+		/* Calculate actual hub tier */
+		actual_hub_tier = 0;
+		struct usb_device *parent = udev->parent;
+		while (parent && parent != udev->bus->root_hub) {
+			actual_hub_tier++;
+			parent = parent->parent;
+		}
+
+		if (dt_hub_tier != actual_hub_tier)
+			return false;
+	}
+
+	return true;
+}
+
+/* Find DT/ACPI node for this USB device */
+static struct fwnode_handle *ch341_find_usb_fwnode(struct usb_device *udev)
+{
+	struct usb_device *parent = udev->parent;
+	struct fwnode_handle *usb_fwnode, *child;
+	u8 compatible[32];
+
+	if (!parent)
+		return NULL;
+
+	usb_fwnode = dev_fwnode(&parent->dev);
+	if (!usb_fwnode)
+		return NULL;
+
+	snprintf(compatible, sizeof(compatible), "usb%04x,%04x",
+			le16_to_cpu(udev->descriptor.idVendor),
+			le16_to_cpu(udev->descriptor.idProduct));
+
+	fwnode_for_each_available_child_node(usb_fwnode, child) {
+		if (!fwnode_device_is_compatible(child, compatible))
+			continue;
+
+		/* Match by USB topology */
+		if (ch341_usb_instance_matches(udev, child))
+			/* caller must put fwnode handle */
+			return child;
+	}
+
+	return NULL;
 }
 
 static int ch341_probe(struct usb_interface *interface,
@@ -615,6 +879,7 @@ static int ch341_probe(struct usb_interface *interface,
 	struct usb_device *udev = interface_to_usbdev(interface);
 	struct usb_endpoint_descriptor *bulk_in;
 	struct usb_endpoint_descriptor *bulk_out;
+	struct fwnode_handle *fwnode;
 	struct ch341_device *ch341;
 	int ret;
 
@@ -636,16 +901,35 @@ static int ch341_probe(struct usb_interface *interface,
 
 	usb_set_intfdata(interface, ch341);
 
+	fwnode = ch341_find_usb_fwnode(ch341->udev);
+	if (fwnode) {
+		dev_info(CH341_DEV, "Found USB DT node\n");
+		device_set_node(CH341_DEV, fwnode);
+	}
+
 	ch341_init_device(ch341);
+
+	/* Initialize GPIO state */
+	ch341->gpio_mask = CH341_GPIO_OUT_MASK;
+	ch341->gpio_data = 0;   /* All pins default to low */
+
+	ret = ch341_spi_probe(ch341);
+	if (ret) {
+		dev_err(dev, "Failed to initialize spi: %d\n", ret);
+		goto err_put_fwnode;
+	}
 
 	ret = ch341_gpio_probe(ch341);
 	if (ret) {
 		dev_err(dev, "Failed to initialize gpio: %d\n", ret);
-		goto err_put_dev;
+		goto err_put_fwnode;
 	}
 
 	return 0;
 
+err_put_fwnode:
+	if (CH341_DEV->fwnode)
+		fwnode_handle_put(CH341_DEV->fwnode);
 err_put_dev:
 	usb_put_dev(ch341->udev);
 	return ret;
@@ -658,8 +942,15 @@ static void ch341_disconnect(struct usb_interface *interface)
 	if (!ch341)
 		return;
 
+	ch341_spi_remove(ch341);
 	ch341_gpio_remove(ch341);
+
 	usb_set_intfdata(interface, NULL);
+
+	if (CH341_DEV->fwnode)
+		fwnode_handle_put(CH341_DEV->fwnode);
+
+	usb_put_dev(ch341->udev);
 }
 
 static const struct usb_device_id ch341_table[] = {
