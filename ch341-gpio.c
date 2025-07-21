@@ -98,9 +98,9 @@ static const char *ch341_pin_names[] = {
 struct ch341_device {
 	struct usb_device *udev;
 	struct usb_interface *intf;
-	struct gpio_chip gpio_chip;
+	struct gpio_chip *gpio_chip;
 	struct spi_controller *spi_ctlr;
-	struct i2c_adapter i2c;
+	struct i2c_adapter *i2c;
 
 	/* USB transfer pipes */
 	unsigned int tx_pipe;
@@ -266,15 +266,15 @@ static int ch341_control_read(struct ch341_device *ch341, u8 request,
 			      u16 value, u16 index, void *data, u16 size)
 {
 	int ret;
-	
+
 	ret = usb_control_msg(ch341->udev,
 			      usb_rcvctrlpipe(ch341->udev, 0), request,
 			      USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 			      value, index, data, size, CH341_DEFAULT_TIMEOUT);
-	
+
 	if (ret < 0)
 		dev_err(CH341_DEV, "Control read failed: %d\n", ret);
-	
+
 	return ret;
 }
 
@@ -282,15 +282,15 @@ static int __maybe_unused ch341_control_write(struct ch341_device *ch341, u8 req
 			      u16 value, u16 index, void *data, u16 size)
 {
 	int ret;
-	
+
 	ret = usb_control_msg(ch341->udev,
 			      usb_sndctrlpipe(ch341->udev, 0), request,
 			      USB_DIR_OUT | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 			      value, index, data, size, CH341_DEFAULT_TIMEOUT);
-	
+
 	if (ret < 0)
 		dev_err(CH341_DEV, "Control write failed: %d\n", ret);
-	
+
 	return ret;
 }
 
@@ -305,7 +305,7 @@ static int ch341_init_device(struct ch341_device *ch341)
 		dev_warn(CH341_DEV, "Failed to get version\n");
 		ch341->ic_version = 0;
 	}
-	
+
 	dev_info(CH341_DEV,
 		 "CH34x device initialized (version: 0x%04x)\n",
 		 ch341->ic_version);
@@ -313,7 +313,7 @@ static int ch341_init_device(struct ch341_device *ch341)
 	return 0;
 }
 
- /* ==============================
+/* ==============================
  * 2. SPI controller implementation
  * ============================== */
 
@@ -339,11 +339,11 @@ static void ch341_spi_set_cs(struct spi_device *spi, bool enable)
 
 	out_data &= ch341->spi_mask;
 
-	u32 old_data = set_mask_bits(&ch341->gpio_data, ch341->spi_mask, out_data);
+	set_mask_bits(&ch341->gpio_data, ch341->spi_mask, out_data);
 
 	cmd[0] = CH341_CMD_UIO_STREAM;
 	cmd[2] = CH341_UIO_STM_DIR | ch341->gpio_mask;
-	cmd[1] = CH341_UIO_STM_OUT | ch341->gpio_data & 0x3f;
+	cmd[1] = CH341_UIO_STM_OUT | (ch341->gpio_data & 0x3F);
 	cmd[3] = CH341_UIO_STM_END;
 
 	ret = ch341_usb_transfer(ch341, cmd, sizeof(cmd), NULL, 0);
@@ -360,7 +360,7 @@ static int ch341_spi_prepare_message(struct spi_controller *ctlr, struct spi_mes
 	u32 pin_mask = BIT(CH341_DCK);
 	u32 pin_data = msg->spi->mode & SPI_CPOL ? pin_mask : 0;
 
-	u32 old_data = set_mask_bits(&ch341->gpio_data, pin_mask, pin_data);
+	set_mask_bits(&ch341->gpio_data, pin_mask, pin_data);
 
 	return 0;
 }
@@ -454,24 +454,33 @@ static int ch341_spi_probe(struct ch341_device *ch341)
 	ctlr->unprepare_message = ch341_spi_unprepare_message;
 	ctlr->transfer_one = ch341_spi_transfer_one;
 	spi_controller_set_devdata(ctlr, ch341);
-	ch341->spi_ctlr = ctlr;
 
 	ch341->spi_mask = GENMASK(5, 0) & ~CH341_DOUT2;
-	u32 old_mask = set_mask_bits(&ch341->gpio_mask, ch341->spi_mask, ch341->spi_mask);
-	u32 old_data = set_mask_bits(&ch341->gpio_data, ch341->spi_mask, (1 << ctlr->num_chipselect) - 1);
+	set_mask_bits(&ch341->gpio_mask, ch341->spi_mask, ch341->spi_mask);
+	set_mask_bits(&ch341->gpio_data, ch341->spi_mask, (1 << ctlr->num_chipselect) - 1);
 
 	ret = devm_spi_register_controller(CH341_DEV, ctlr);
-	if (ret)
+	if (ret) {
+		if (fwnode)
+			fwnode_handle_put(fwnode);
 		return ret;
+	}
+
+	ch341->spi_ctlr = ctlr;
 
 	dev_info(CH341_DEV, "SPI registered with %d chip selects\n", ctlr->num_chipselect);
+
 	return 0;
 }
 
 static void ch341_spi_remove(struct ch341_device *ch341)
 {
-	struct fwnode_handle *fwnode = ch341->spi_ctlr->dev.fwnode;
+	struct fwnode_handle *fwnode;
 
+	if (!ch341->spi_ctlr)
+		return;
+
+	fwnode = ch341->spi_ctlr->dev.fwnode;
 	if (fwnode)
 		fwnode_handle_put(fwnode);
 }
@@ -719,7 +728,7 @@ static int ch341_gpio_init_valid_mask(struct gpio_chip *chip,
 
 	dev_dbg(CH341_DEV, "%s %lx %d\n", __func__, *valid_mask, ngpios);
 
-	if (ngpios != ch341->gpio_chip.ngpio)
+	if (ngpios != fls(CH341_GPIO_MASK))
 		return -EINVAL;
 
 	*valid_mask = CH341_GPIO_MASK;
@@ -731,7 +740,7 @@ static int ch341_gpio_init_valid_mask(struct gpio_chip *chip,
 /* GPIO chip registration */
 int ch341_gpio_probe(struct ch341_device *ch341)
 {
-	struct gpio_chip *gpio_chip = &ch341->gpio_chip;
+	struct gpio_chip *gpio_chip;
 	struct fwnode_handle *fwnode;
 	int ret;
 
@@ -740,6 +749,10 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 		dev_info(CH341_DEV, "GPIO controller disabled\n");
 		return 0;
 	}
+
+	gpio_chip = devm_kzalloc(CH341_DEV, sizeof(struct gpio_chip), GFP_KERNEL);
+	if (!gpio_chip)
+		return -ENOMEM;
 
 	// TODO parse gpio fwnode properties?
 
@@ -797,13 +810,19 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 			dev_warn(CH341_DEV, "Failed to populate child devices: %d\n", ret);
 	}
 
+	ch341->gpio_chip = gpio_chip;
+
 	return 0;
 }
 
 void ch341_gpio_remove(struct ch341_device *ch341)
 {
-	struct fwnode_handle *fwnode = ch341->gpio_chip.fwnode;
+	struct fwnode_handle *fwnode;
 
+	if (!ch341->gpio_chip)
+		return;
+
+	fwnode = ch341->gpio_chip->fwnode;
 	if (fwnode) {
 		dev_info(CH341_DEV, "Unregistering child devices\n");
 		/* Remove child devices created by of_platform_populate */
@@ -945,11 +964,10 @@ static void ch341_disconnect(struct usb_interface *interface)
 	ch341_spi_remove(ch341);
 	ch341_gpio_remove(ch341);
 
-	usb_set_intfdata(interface, NULL);
-
 	if (CH341_DEV->fwnode)
 		fwnode_handle_put(CH341_DEV->fwnode);
 
+	usb_set_intfdata(interface, NULL);
 	usb_put_dev(ch341->udev);
 }
 
