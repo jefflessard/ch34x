@@ -1,9 +1,5 @@
 ### CH341A USB Bridge Chip Interface Documentation
 
-- All commands support both **USB Control OUT** and **USB Bulk OUT** endpoints unless explicitly stated otherwise
-- All multi-byte values use little-endian format
-- All delays require explicit values (no default timing)  
-
 **Maximum Values:**  
 - EPP/MEM transfers: 31 bytes  
 - SPI transfers: 32 bytes  
@@ -126,7 +122,7 @@
 *Only supports full-duplex streaming. The number of bytes read always matches the number of written bytes.*  
 | Byte | Bit Range | Field         | Description                   |
 |------|-----------|---------------|-------------------------------|
-| 0-N  | [7:0]     | SPI Read Bytes | Received MISO data on DIN/DIN2. |
+| 0-N  | [7:0]     | SPI Read Bytes | Received MISO data on DIN/DIN2. LSB-first. |
 
 **SPI Line and Mode Configuration:**  
 SPI bus lines and protocol options are actively controlled via the state and direction of GPIO[0:5], which are set using `CMD_UIO_STREAM` with the following subcommands:
@@ -171,7 +167,8 @@ SPI bus lines and protocol options are actively controlled via the state and dir
 
 **Notes:**  
 - **CMD_SPI_STREAM only transfers data.** All SPI bus configuration (chip select, clock polarity, direction, 3-wire mode) must be set via UIO_STM_DIR and UIO_STM_OUT before each transfer phase.  
-- **The output and direction settings of GPIO[0:5] are not changed by SPI stream commands.** They must be managed explicitly by the host.  
+- **The output and direction settings of GPIO[0:5] are not changed by SPI stream commands.** They must be managed explicitly by the host.
+- Data bytes are transferred using lowest significant bit (LSB) first format.  
 
 ---
 
@@ -298,7 +295,7 @@ The END subcommand serves as a required terminator for all I²C operations. Its 
 
 #### CMD_UIO_STREAM (0xAB)
 **USB Endpoint:** BULK_OUT (command+data) → BULK_IN (optional response)  
-**Description:** Unified interface for GPIO and SPI operations  
+**Description:** Unified interface for direct GPIO and SPI pins control. Accepts a sequence of subcommands, each encoded as a single byte, in a single command stream. This mechanism is used for fine-grained, atomic manipulation of GPIO[0:5] for SPI and general GPIO use.  
 
 **Subcommands:**  
 
@@ -307,30 +304,45 @@ The END subcommand serves as a required terminator for all I²C operations. Its 
 | Byte | Value | Field        | Description          |
 |------|-------|--------------|--------------------------------|
 | 0    | 0xAB  | Stream Code  | Always 0xAB for subcommands |
-| 1    | 0x00  | Subcommand   | GPIO input read           |
+| ..   | ..    | ..           | Other subcommands |
+| n    | 0x00  | Subcommand   | GPIO input read           |
+| ..   | ..    | ..           | Other subcommands |
 
 **Response:**  
 | Byte | Bit Range | Field  | Description      |
 |------|-----------|--------|------------------|
-| 0    | [7:0]     | GPIO[7:0] | Current state of D7-D0 lines |
+| n    | [7:0]     | GPIO[7:0] | Current state of D7-D0 lines |
 
 ##### UIO_STM_DIR (0x40)
-**Description:** Sets GPIO direction.  
+**Description:** Sets direction for GPIO [5:0]  
 | Byte | Value | Field       | Description                      |
 |------|-------|-------------|----------------------------------|
 | 0    | 0xAB  | Stream Code | Always 0xAB                      |
-| 1    | 0x40  | Subcommand  | GPIO direction control           |
-| 2    | 0x??  | Dir Mask    | Mask Structure:<br>- Bits [5:0]: GPIO [5:0] direction (0=input, 1=output)<br>- Bits [7:6] always 0 |
+| ..   | ..    | ..           | Other subcommands |
+| n    | 0x40 \| dir_mask | dir_mask | Direction control:<br>Bits 0-5: GPIO[5:0] (0=input, 1=output) |
+| ..   | ..    | ..           | Other subcommands |
 
 **No Response**  
 
 ##### UIO_STM_OUT (0x80)
-**Description:** Write GPIO [5:0]  
+**Description:** Write output value for GPIO [5:0]  
 | Byte | Value | Field      | Description                  |
 |------|-------|------------|------------------------------|
 | 0    | 0xAB  | Stream Code| Always 0xAB                  |
-| 1    | 0x80  | Subcommand | GPIO output write            |
-| 2    | 0x??  | Data       | Data Structure:<br>- Bits [5:0]: GPIO [5:0] output state<br>- Bits [7:6] always 0 |
+| ..   | ..    | ..           | Other subcommands |
+| n    | 0x80 \| out_mask | out_mask | Output value:<br>Bits 0-5: GPIO[5:0] output data (0=low, 1=high) |
+| ..   | ..    | ..           | Other subcommands |
+
+**No Response**
+
+##### UIO_STM_US (0xC0)
+**Description:** Insert delay in microseconds  
+| Byte | Value | Field      | Description                  |
+|------|-------|------------|------------------------------|
+| 0    | 0xAB  | Stream Code| Always 0xAB                  |
+| ..   | ..    | ..           | Other subcommands |
+| n    | 0xC0 \| delay | delay | Delay in microseconds (up to 6 bits) |
+| ..   | ..    | ..           | Other subcommands |
 
 **No Response**
 
@@ -339,10 +351,23 @@ The END subcommand serves as a required terminator for all I²C operations. Its 
 | Byte | Value | Field        | Description          |
 |------|-------|--------------|----------------------|
 | 0    | 0xAB  | Stream Code  | Always 0xAB          |
-| ..   | ..    | ..           | Other subcommands and parameters |
+| ..   | ..    | ..           | Other subcommands |
 | N    | 0x20  | Subcommand   | End sequence         |
 
 **No Response**
+
+**Usage Pattern:**
+- **Multiple subcommands** can be concatenated in a single CMD_UIO_STREAM. The device will execute them in order.
+*Multiple subcommands per stream are allowed and normal. It is not required to send each subcommand in a separate transfer.*
+- Each subcommand is a single byte: the upper bits identify the operation, lower bits are the mask/data/delay.
+- For full protocol compliance, always finish your sequence with UIO_STM_END.
+
+**Example:**
+```c
+// Set GPIO[5:0] as outputs, set CS0 low, DCK low, DOUT output, then end
+[0xAB, 0x40 | 0x3F, 0x80 | 0x01, 0x20]
+```
+- This sets all SPI pins as outputs, asserts CS0 (bit 0 low), and ends the stream.
 
 ---
 
@@ -389,4 +414,3 @@ The following constants are defined but unused/undocumented:
 | CMD_PRINT_OUT | 0xA3 | print output |
 | CMD_SIO_STREAM | 0xA9 | SIO command |
 | CMD_BUF_CLEAR | 0xB2 | clear uncompleted data |
-| UIO_STM_US | 0xC0 | UIO Interface Delay Command (us) |
