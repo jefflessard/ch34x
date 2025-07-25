@@ -111,28 +111,67 @@
 
 ---
 
-#### CMD_SPI_STREAM (0xA8)  
+#### CMD_SPI_STREAM (0xA8)
+
 **USB Endpoint:** BULK_OUT (command+data) → BULK_IN (response)  
-**Description:** SPI data transfer
+**Description:** Performs SPI data transfer using the currently configured GPIO[5:0] as SPI lines. The actual SPI transfer behavior (chip select, clock polarity, I/O direction, etc.) is determined by the state of these GPIO pins, which must be explicitly configured using `CMD_UIO_STREAM` subcommands prior to issuing the SPI stream command.
+
 **Parameters:**  
-| Byte | Value       | Field        | Description          |
-|------|-------------|--------------|----------------------|
-| 0    | 0xA8        | Command      | SPI transfer start   |
-| 1-N  | Data Bytes  | SPI Payload  | Up to 32 bytes LSB-first|
+| Byte | Value       | Field        | Description                       |
+|------|-------------|--------------|-----------------------------------|
+| 0    | 0xA8        | Command      | SPI transfer start                |
+| 1-N  | Data Bytes  | SPI Write Bytes | MOSI data to write to DOUT/DOUT2. Up to 32 bytes, LSB-first. |
 
 **Response:**  
-| Byte | Bit Range | Field   | Description      |
-|------|-----------|---------|------------------|
-| 0-N  | [7:0]     | Data Bytes | MISO data (if connected) |
+*Only supports full-duplex streaming. The number of bytes read always matches the number of written bytes.*  
+| Byte | Bit Range | Field         | Description                   |
+|------|-----------|---------------|-------------------------------|
+| 0-N  | [7:0]     | SPI Read Bytes | Received MISO data on DIN/DIN2. |
 
-**Chip Select Control:**  
-Use `CMD_UIO_STREAM UIO_STM_OUT (0xAB 0x80)` with masks:  
-| Mask | CS Behavior       |
-|------|-------------------|
-| 0x36 | All CS inactive   |
-| 0x35 | CS via GPIO 1     |
-| 0x33 | CS via GPIO 2     |
-| 0x27 | CS via GPIO 4     |
+**SPI Line and Mode Configuration:**  
+SPI bus lines and protocol options are actively controlled via the state and direction of GPIO[0:5], which are set using `CMD_UIO_STREAM` with the following subcommands:
+
+- **UIO_STM_DIR (0x40 | mask):** Set direction for GPIO[5:0].  
+    - Bit = 1: output  
+    - Bit = 0: input  
+- **UIO_STM_OUT (0x80 | value):** Set output level for GPIO[5:0].  
+    - Bit = 1: high  
+    - Bit = 0: low  
+- **UIO_STM_END (0x20):** Marks the end of the subcommand stream.
+
+**SPI Pins Mapping:**  
+| GPIO | Signal | Description                |
+|------|--------|----------------------------|
+| 0    | CS0    | Chip Select 0 (active low) |
+| 1    | CS1    | Chip Select 1 (active low) |
+| 2    | CS2    | Chip Select 2 (active low) |
+| 3    | DCK    | SPI Clock                  |
+| 4    | DOUT2  | Dual Output (not always used) |
+| 5    | DOUT   | MOSI (output)              |
+
+**CPOL (Clock Polarity) and 3-wire (Half-duplex) Support:**  
+- **CPOL:** Set DCK (GPIO3) output level for idle state (low for CPOL=0, high for CPOL=1) before issuing the SPI stream.  
+- **3-wire (Half-duplex):** Change DOUT (GPIO5) direction between input and output using UIO_STM_DIR. For RX, set DOUT as input; for TX, set as output. *Note: DIN pin is always used as MISO to read data, no matter if DOUT is set to input mode.*  
+- The state and direction of each pin **at the time the SPI stream is issued** determines the SPI protocol behavior.  
+
+**Chip Select Handling:**  
+- Chip select lines (CS0/CS1/CS2) must be asserted/deasserted by setting GPIO0/1/2 output state appropriately using UIO_STM_OUT before and after the SPI transfer.  
+
+**Example:**
+```c
+// 1. Assert CS0 (set CS0 low), set DCK low (CPOL=0), set DOUT as output
+[0xAB, 0x40 | dir_mask, 0x80 | out_mask, 0x20]
+
+// 2. Send SPI data
+[0xA8, ...data...]
+
+// 3. Deassert CS0 (set CS0 high)
+[0xAB, 0x40 | dir_mask, 0x80 | out_mask, 0x20]
+```
+
+**Notes:**  
+- **CMD_SPI_STREAM only transfers data.** All SPI bus configuration (chip select, clock polarity, direction, 3-wire mode) must be set via UIO_STM_DIR and UIO_STM_OUT before each transfer phase.  
+- **The output and direction settings of GPIO[0:5] are not changed by SPI stream commands.** They must be managed explicitly by the host.  
 
 ---
 
