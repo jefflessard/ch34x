@@ -6,6 +6,7 @@ obj-m += $(MODULE_NAME).o
 $(MODULE_NAME)-objs += ch341-core.o
 $(MODULE_NAME)-objs += ch341-gpio.o
 $(MODULE_NAME)-objs += ch341-spi.o
+$(MODULE_NAME)-objs += ch341-i2c.o
 
 # Path to the kernel source tree
 KDIR ?= /lib/modules/$(shell uname -r)/build

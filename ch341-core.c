@@ -1,8 +1,5 @@
 #include "ch341-core.h"
 
-inline int ch341_i2c_probe(struct ch341_device *ch341){return 0;}
-inline void ch341_i2c_remove(struct ch341_device *ch341){}
-
 /* usb wrappers */
 struct urb *ch341_alloc_urb(struct ch341_device *ch341, void *buf, int len) {
 	struct urb *urb;
@@ -352,10 +349,16 @@ static int ch341_probe(struct usb_interface *interface,
 	ch341->gpio_mask = CH341_GPIO_OUT_MASK;
 	ch341->gpio_data = 0;   /* All pins default to low */
 
+	ret = ch341_i2c_probe(ch341);
+	if (ret) {
+		dev_err(dev, "Failed to initialize i2c: %d\n", ret);
+		goto err_put_fwnode;
+	}
+
 	ret = ch341_spi_probe(ch341);
 	if (ret) {
 		dev_err(dev, "Failed to initialize spi: %d\n", ret);
-		goto err_put_fwnode;
+		goto err_i2c_remove;
 	}
 
 	ret = ch341_gpio_probe(ch341);
@@ -366,6 +369,8 @@ static int ch341_probe(struct usb_interface *interface,
 
 	return 0;
 
+err_i2c_remove:
+	ch341_i2c_remove(ch341);
 err_spi_remove:
 	ch341_spi_remove(ch341);
 err_put_fwnode:
@@ -383,6 +388,7 @@ static void ch341_disconnect(struct usb_interface *interface)
 	if (!ch341)
 		return;
 
+	ch341_i2c_remove(ch341);
 	ch341_spi_remove(ch341);
 	ch341_gpio_remove(ch341);
 

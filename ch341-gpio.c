@@ -231,6 +231,7 @@ static int ch341_gpio_init_valid_mask(struct gpio_chip *chip,
 
 	*valid_mask = CH341_GPIO_MASK;
 	*valid_mask &= ~ch341->spi_mask;
+	*valid_mask &= ~ch341->i2c_mask;
 
 	return 0;
 }

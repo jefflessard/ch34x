@@ -79,6 +79,7 @@ struct ch341_device {
 	u32 gpio_mask;  /* Direction: 1=output, 0=input */
 	u32 gpio_data;  /* Current pin values */
 	u32 spi_mask; /* Reserved SPI pins */
+	u32 i2c_mask; /* Reserved I2C pins */
 
 	/* IC version for compatibility */
 	u16 ic_version;
