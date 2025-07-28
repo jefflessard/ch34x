@@ -70,6 +70,7 @@ struct ch341_device {
 	struct gpio_chip *gpio_chip;
 	struct spi_controller *spi_ctlr;
 	struct i2c_adapter *i2c;
+	struct usb_anchor anchor;
 
 	/* USB transfer pipes */
 	unsigned int tx_pipe;
@@ -86,17 +87,17 @@ struct ch341_device {
 };
 
 struct ch341_transfer {
-    struct ch341_device *dev;
-    struct urb *tx_urb;
-    struct urb *rx_urb;
-    
-    /* Completion tracking */
-    atomic_t pending_urbs;
-    int status;
-    
-    /* User callback */
-    void (*complete)(struct ch341_transfer *xfer);
-    void *context;
+	struct ch341_device *dev;
+	struct urb *tx_urb;
+	struct urb *rx_urb;
+
+	/* Completion tracking */
+	atomic_t pending_urbs;
+	int status;
+
+	/* User callback */
+	void (*complete)(struct ch341_transfer *xfer);
+	void *context;
 };
 
 /* subdevices */

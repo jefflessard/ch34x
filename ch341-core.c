@@ -57,7 +57,7 @@ static void ch341_urb_complete(struct urb *urb)
 		dev_dbg(CH341_DEV, "usb_submit_urb completed\n");
 
 		if (urb == xfer->rx_urb) {
-			dev_dbg(CH341_DEV, "rx: %*ph\n", urb->actual_length, urb->transfer_buffer);
+			dev_dbg(CH341_DEV, "rx %d bytes: %*ph\n", urb->actual_length, urb->actual_length, urb->transfer_buffer);
 		}
 	}
 
@@ -86,7 +86,8 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 	struct ch341_transfer *xfer;
 	int ret;
 
-	dev_dbg(CH341_DEV, "%s: tx %*ph\n", __func__, tx_urb->transfer_buffer_length, tx_urb->transfer_buffer);
+	if (!rx_urb && !tx_urb)
+		return -ENOENT;
 
 	xfer = kzalloc(sizeof(*xfer), GFP_KERNEL);
 	if (!xfer)
@@ -94,6 +95,8 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 
 	/* Setup TX URB */
 	if (tx_urb) {
+		dev_dbg(CH341_DEV, "%s: tx %u bytes %*ph\n", __func__, tx_urb->transfer_buffer_length, tx_urb->transfer_buffer_length, tx_urb->transfer_buffer);
+
 		tx_urb->pipe = ch341->tx_pipe;
 		tx_urb->complete = ch341_urb_complete;
 		tx_urb->context = xfer;
@@ -102,6 +105,8 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 
 	/* Setup TX URB */
 	if (rx_urb) {
+		dev_dbg(CH341_DEV, "%s: rx %u bytes\n", __func__, rx_urb->transfer_buffer_length);
+
 		rx_urb->pipe = ch341->rx_pipe;
 		rx_urb->complete = ch341_urb_complete;
 		rx_urb->context = xfer;
@@ -120,8 +125,12 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 
 	/* Submit both URBs simultaneously for full-duplex */
 	if (tx_urb) {
+		usb_anchor_urb(tx_urb, &ch341->anchor);
 		ret = usb_submit_urb(tx_urb, GFP_KERNEL);
 		if (ret) {
+			dev_err(CH341_DEV, "failed to submit tx urb: %d\n", ret);
+
+			usb_unanchor_urb(tx_urb);
 			tx_urb->context = NULL;
 			if (rx_urb) rx_urb->context = NULL;
 			kfree(xfer);
@@ -130,12 +139,17 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 	}
 
 	if (rx_urb) {
+		usb_anchor_urb(rx_urb, &ch341->anchor);
 		ret = usb_submit_urb(rx_urb, GFP_KERNEL);
 		if (ret) {
+			dev_err(CH341_DEV, "failed to submit rx urb: %d\n", ret);
+
 			if (tx_urb) {
 				usb_kill_urb(tx_urb);
 				tx_urb->context = NULL;
 			}
+
+			usb_unanchor_urb(rx_urb);
 			rx_urb->context = NULL;
 			kfree(xfer);
 			return ret;
@@ -343,6 +357,7 @@ static int ch341_probe(struct usb_interface *interface,
 		device_set_node(CH341_DEV, fwnode);
 	}
 
+	init_usb_anchor(&ch341->anchor);
 	ch341_init_device(ch341);
 
 	/* Initialize GPIO state */
@@ -387,6 +402,8 @@ static void ch341_disconnect(struct usb_interface *interface)
 
 	if (!ch341)
 		return;
+
+	usb_kill_anchored_urbs(&ch341->anchor);
 
 	ch341_i2c_remove(ch341);
 	ch341_spi_remove(ch341);
