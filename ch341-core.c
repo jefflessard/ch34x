@@ -229,8 +229,8 @@ static int ch341_control_read(struct ch341_device *ch341, u8 request,
 	return ret;
 }
 
-static int __maybe_unused ch341_control_write(struct ch341_device *ch341, u8 request,
-			      u16 value, u16 index, void *data, u16 size)
+static int ch341_control_write(struct ch341_device *ch341, u8 request,
+			       u16 value, u16 index, void *data, u16 size)
 {
 	int ret;
 
@@ -248,6 +248,23 @@ static int __maybe_unused ch341_control_write(struct ch341_device *ch341, u8 req
 static int ch341_init_device(struct ch341_device *ch341)
 {
 	int ret;
+
+	/* Initialize parallel port mode:
+	 *  - reset / clear buffer
+	 *  - RST# outputs a low level pulse
+	 * high byte:
+	 * - 0: EPP mode/EPP mode V1.7 (default)
+	 * - 1: EPP mode V1.9
+	 * - 2: MEM mode
+	 * low byte:
+	 * - 0: keeps the current mode
+	 * - 2: configures specified mode */
+	u16 init_cmd = (0x00 << 8) | 0x02;
+	ret = ch341_control_write(ch341, CH341_CTRL_PARA_INIT, init_cmd, 0, NULL, 0);
+	if (ret < 0) {
+		dev_err(CH341_DEV, "Device initialization failed\n");
+		return ret;
+	}
 
 	/* Get device version */
 	ret = ch341_control_read(ch341, CH341_CTRL_VERSION, 0, 0,
