@@ -231,39 +231,6 @@ free_urbs:
 	return ret ? ret : num;
 }
 
-int ch341_i2c_set_speed(struct ch341_device *ch341, u8 speed)
-{
-	struct urb *tx_urb;
-	u8 *cmd;
-	int ret;
-
-	tx_urb = ch341_alloc_urb(ch341, NULL, 3);
-	if (!tx_urb) return -ENOMEM;
-	cmd = tx_urb->transfer_buffer;
-
-
-	/* Bits 1-0: I2C speed/SCL frequency:
-	 * - 0: low speed 20KHz
-	 * - 1: standard 100KHz
-	 * - 2: fast 400KHz
-	 * - 3: high speed 750KHz
-	 * Bit 2: SPI I/O number/IO pin:
-	 * - 0: single input/output (4-wire)
-	 * - 1: dual input/output (5-wire)
-	 * Bit 7: Bit order in SPI byte
-	 * - 0: LSb-first
-	 * - 1: MSb-first */
-	cmd[0] = CH341_CMD_I2C_STREAM;
-	cmd[1] = CH341_I2C_STM_SET | (speed & 0x03);
-	cmd[2] = CH341_I2C_STM_END;
-
-	ret = ch341_usb_transfer(ch341, tx_urb, NULL, ch341_complete, NULL);
-	if (ret < 0)
-		dev_err(CH341_DEV, "Failed to set I2C speed: %d\n", ret);
-
-	return 0;
-}
-
 static u32 ch341_i2c_func(struct i2c_adapter *adap)
 {
 	/* Supported:
@@ -295,6 +262,7 @@ static const struct i2c_algorithm ch341_i2c_algo = {
 int ch341_i2c_probe(struct ch341_device *ch341)
 {
 	struct i2c_adapter *i2c;
+	struct i2c_timings timings;
 	struct fwnode_handle *fwnode;
 	int ret;
 
@@ -326,7 +294,18 @@ int ch341_i2c_probe(struct ch341_device *ch341)
 	/* reserve I2C pins */
 	ch341->i2c_mask = GENMASK(19, 18);
 
-	ch341_i2c_set_speed(ch341, CH341_I2C_100KHZ);
+	/* configure I2C bus speed */
+	i2c_parse_fw_timings(&i2c->dev, &timings, true);
+	if (timings.bus_freq_hz < 100000)
+		ch341_stream_config(ch341, CH341_I2C_SPEED_MASK,
+				    CH341_I2C_20KHZ);
+	else if (timings.bus_freq_hz < 400000)
+		ch341_stream_config(ch341, CH341_I2C_SPEED_MASK,
+				    CH341_I2C_100KHZ);
+	else if (timings.bus_freq_hz < 750000)
+		ch341_stream_config(ch341, CH341_I2C_SPEED_MASK,
+				    CH341_I2C_400KHZ);
+	else ch341_stream_config(ch341, CH341_I2C_SPEED_MASK, CH341_I2C_750KHZ);
 
 	ret = devm_i2c_add_adapter(CH341_DEV, ch341->i2c);
 	if (ret) {

@@ -192,6 +192,38 @@ int ch341_usb_transfer_wait(struct ch341_device *dev,
 	return 0;
 }
 
+/* shared functions */
+int ch341_stream_config(struct ch341_device *ch341, u8 mask, u8 bits)
+{
+	struct urb *tx_urb;
+	u8 old_config;
+	u8 *cmd;
+	int ret;
+
+	mask &= CH341_I2C_SPEED_MASK | CH341_SPI_DUAL_MASK;
+	bits &= mask;
+
+	old_config = set_mask_bits(&ch341->stream_config, mask, bits);
+
+	/* no change required */
+	if ((old_config & mask) == bits)
+		return 0;
+
+	tx_urb = ch341_alloc_urb(ch341, NULL, 3);
+	if (!tx_urb) return -ENOMEM;
+	cmd = tx_urb->transfer_buffer;
+
+	cmd[0] = CH341_CMD_I2C_STREAM;
+	cmd[1] = CH341_I2C_STM_SET | ch341->stream_config;
+	cmd[2] = CH341_I2C_STM_END;
+
+	ret = ch341_usb_transfer(ch341, tx_urb, NULL, ch341_complete, NULL);
+	if (ret < 0)
+		dev_err(CH341_DEV, "Failed to set I2C speed: %d\n", ret);
+
+	return 0;
+}
+
 /* fwnode helper functions */
 struct fwnode_handle* ch341_get_compatible_fwnode(struct ch341_device *ch341, const char *compatible)
 {
@@ -249,17 +281,7 @@ static int ch341_init_device(struct ch341_device *ch341)
 {
 	int ret;
 
-	/* Initialize parallel port mode:
-	 *  - reset / clear buffer
-	 *  - RST# outputs a low level pulse
-	 * high byte:
-	 * - 0: EPP mode/EPP mode V1.7 (default)
-	 * - 1: EPP mode V1.9
-	 * - 2: MEM mode
-	 * low byte:
-	 * - 0: keeps the current mode
-	 * - 2: configures specified mode */
-	u16 init_cmd = (0x00 << 8) | 0x02;
+	u16 init_cmd = CH341_PARA_MODE_MEM | CH341_PARA_MODE_SET;
 	ret = ch341_control_write(ch341, CH341_CTRL_PARA_INIT, init_cmd, 0, NULL, 0);
 	if (ret < 0) {
 		dev_err(CH341_DEV, "Device initialization failed\n");

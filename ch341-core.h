@@ -19,6 +19,22 @@
 /* Control Commands */
 #define CH341_CTRL_VERSION	0x5F
 #define CH341_CTRL_PARA_INIT	0xB1
+#define CH341_PARA_MODE_EPP17	(0 << 8)
+#define CH341_PARA_MODE_EPP19	(1 << 8)
+#define CH341_PARA_MODE_MEM	(2 << 8)
+#define CH341_PARA_MODE_KEEP	0
+#define CH341_PARA_MODE_SET	2
+	/* Initialize parallel port mode:
+	 *  - reset / clear buffer
+	 *  - RST# outputs a low level pulse
+	 * high byte:
+	 * - 0: EPP mode/EPP mode V1.7 (default)
+	 * - 1: EPP mode V1.9
+	 * - 2: MEM mode
+	 * low byte:
+	 * - 0: keeps the current mode
+	 * - 2: configures specified mode */
+
 #define CH341_CTRL_DEBUG_WRITE	0x9A
 
 /* CH341 Commands */
@@ -31,6 +47,17 @@
 #define CH341_I2C_STM_US	0x40
 #define CH341_I2C_STM_MS	0x50
 #define CH341_I2C_STM_SET	0x60
+#define CH341_I2C_SPEED_MASK	GENMASK(1, 0)
+#define CH341_SPI_DUAL_MASK	BIT(2)
+	/* Bits 1-0: I2C speed/SCL frequency:
+	 * - 0: low speed 20KHz
+	 * - 1: standard 100KHz
+	 * - 2: fast 400KHz
+	 * - 3: high speed 750KHz
+	 * Bit 2: SPI I/O number/IO pin:
+	 * - 0: single input/output (4-wire)
+	 * - 1: dual input/output (5-wire) */
+
 #define CH341_I2C_STM_STA	0x74
 #define CH341_I2C_STM_STO	0x75
 #define CH341_I2C_STM_OUT	0x80
@@ -82,6 +109,9 @@ struct ch341_device {
 	u32 spi_mask; /* Reserved SPI pins */
 	u32 i2c_mask; /* Reserved I2C pins */
 
+	/* I2C/SPI stream config */
+	u8 stream_config;
+
 	/* IC version for compatibility */
 	u16 ic_version;
 };
@@ -109,6 +139,9 @@ void ch341_gpio_remove(struct ch341_device *ch341);
 
 int ch341_i2c_probe(struct ch341_device *ch341);
 void ch341_i2c_remove(struct ch341_device *ch341);
+
+/* shared functions */
+int ch341_stream_config(struct ch341_device *ch341, u8 mask, u8 bits);
 
 /* fwnode helper functions */
 struct fwnode_handle* ch341_get_compatible_fwnode(struct ch341_device *ch341, const char *compatible);
