@@ -263,25 +263,25 @@ int ch341_i2c_probe(struct ch341_device *ch341)
 {
 	struct i2c_adapter *i2c;
 	struct i2c_timings timings;
-	struct fwnode_handle *fwnode;
+	struct fwnode_handle *fwnode = NULL;
+	u8 speed = CH341_I2C_100KHZ;
 	int ret;
 
-	fwnode = ch341_get_compatible_fwnode(ch341, "wch,ch341-i2c");
-#if 0
-	if (!fwnode) {
-		dev_info(CH341_DEV, "I2C adapter disabled\n");
-		return 0;
+	if (CH341_DEV->fwnode) {
+		fwnode = ch341_get_compatible_fwnode(ch341, "wch-ic,ch341-i2c");
+		if (!fwnode) {
+			dev_info(CH341_DEV, "I2C adapter disabled (no DT node found)\n");
+			return 0;
+		}
 	}
-#endif
 
 	i2c = devm_kzalloc(CH341_DEV, sizeof(*i2c), GFP_KERNEL);
 	if (!i2c)
 		return -ENOMEM;
 
 	i2c->dev.fwnode = fwnode;
-	if (fwnode && is_of_node(fwnode)) {
+	if (fwnode && is_of_node(fwnode))
 		i2c->dev.of_node = to_of_node(fwnode);
-	}
 
 	i2c->owner = THIS_MODULE;
 	i2c->algo = &ch341_i2c_algo;
@@ -295,27 +295,37 @@ int ch341_i2c_probe(struct ch341_device *ch341)
 	ch341->i2c_mask = GENMASK(19, 18);
 
 	/* configure I2C bus speed */
-	i2c_parse_fw_timings(&i2c->dev, &timings, true);
-	if (timings.bus_freq_hz < 100000)
-		ch341_stream_config(ch341, CH341_I2C_SPEED_MASK,
-				    CH341_I2C_20KHZ);
-	else if (timings.bus_freq_hz < 400000)
-		ch341_stream_config(ch341, CH341_I2C_SPEED_MASK,
-				    CH341_I2C_100KHZ);
-	else if (timings.bus_freq_hz < 750000)
-		ch341_stream_config(ch341, CH341_I2C_SPEED_MASK,
-				    CH341_I2C_400KHZ);
-	else ch341_stream_config(ch341, CH341_I2C_SPEED_MASK, CH341_I2C_750KHZ);
+	if (fwnode) {
+		i2c_parse_fw_timings(&i2c->dev, &timings, true);
+		if (timings.bus_freq_hz < 100000)
+			speed = CH341_I2C_20KHZ;
+		else if (timings.bus_freq_hz < 400000)
+			speed = CH341_I2C_100KHZ;
+		else if (timings.bus_freq_hz < 750000)
+			speed = CH341_I2C_400KHZ;
+		else speed = CH341_I2C_750KHZ;
+	}
+	ret = ch341_stream_config(ch341, CH341_I2C_SPEED_MASK, speed);
+	if (ret) {
+		dev_err(CH341_DEV, "Failed to configure I2C adapter frequency: %d\n", ret);
+		goto err_free_i2c;
+	}
 
 	ret = devm_i2c_add_adapter(CH341_DEV, ch341->i2c);
 	if (ret) {
 		dev_err(CH341_DEV, "Failed to register I2C adapter: %d\n", ret);
-		return ret;
+		goto err_free_i2c;
 	}
 
 	dev_info(CH341_DEV, "I2C adapter registered\n");
 
 	return 0;
+
+err_free_i2c:
+	i2c_set_adapdata(i2c, NULL);
+	devm_kfree(CH341_DEV, i2c);
+	ch341->i2c = NULL;
+	return ret;
 }
 
 void ch341_i2c_remove(struct ch341_device *ch341) {
@@ -324,11 +334,10 @@ void ch341_i2c_remove(struct ch341_device *ch341) {
 	if (!ch341->i2c)
 		return;
 
-	i2c_set_adapdata(ch341->i2c, NULL);
-
 	fwnode = ch341->i2c->dev.fwnode;
-	if (fwnode)
-		fwnode_handle_put(fwnode);
+	if (fwnode) fwnode_handle_put(fwnode);
+
+	i2c_set_adapdata(ch341->i2c, NULL);
 
 	/* not required since using devm_*:
 	 * i2c_del_adapter(ch341->i2c);

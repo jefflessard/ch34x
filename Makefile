@@ -15,8 +15,11 @@ PWD := $(shell pwd)
 
 default: module
 
+debug: CCFLAGS += -g -DDEBUG
+debug: module
+
 module:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
+	$(MAKE) EXTRA_CFLAGS="$(CCFLAGS)" -C $(KDIR) M=$(PWD) modules
 
 install:
 	$(MAKE) -C $(KDIR) M=$(PWD) modules_install INSTALL_MOD_PATH=$(INSTALL_MOD_PATH)

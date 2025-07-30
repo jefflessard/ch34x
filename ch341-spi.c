@@ -1,6 +1,8 @@
 #include "ch341-core.h"
 #include <linux/bitrev.h>
 
+#define CH341_NUM_CHIPSELECT 3
+
 /* SPI Pins */
 #define CH341_CS0	BIT(0)
 #define CH341_CS1	BIT(1)
@@ -8,6 +10,10 @@
 #define CH341_DCK	BIT(3)
 #define CH341_DOUT2	BIT(4)
 #define CH341_DOUT	BIT(5)
+#define CH341_DIN2	BIT(6)
+#define CH341_DIN	BIT(7)
+
+#define CH341_OUT_MASK	GENMASK(5, 0)
 
 static inline void ch341_spi_buf_bitrev8(u8 *buf, size_t len) {
     for (u8 *p = buf; p < buf + len; p++) {
@@ -21,8 +27,8 @@ static int ch341_spi_update_pins(struct ch341_device *ch341, u32 gpio_mask, u32 
 	u8 *cmd;
 	int ret;
 
-	gpio_mask &= ch341->spi_mask & 0x3F;
-	gpio_data &= ch341->spi_mask & 0x3F;
+	gpio_mask &= ch341->spi_mask & CH341_OUT_MASK;
+	gpio_data &= ch341->spi_mask & CH341_OUT_MASK;
 
 	tx_urb = ch341_alloc_urb(ch341, NULL, 4);
 	if (!tx_urb) return -ENOMEM;
@@ -45,7 +51,7 @@ static int ch341_spi_enable_pins(struct ch341_device *ch341, u32 mask, u32 bits)
 	u32 old_mask;
 
 	mask &= ch341->spi_mask;
-	bits &= ch341->spi_mask;
+	bits &= mask;
 
 	old_mask = set_mask_bits(&ch341->gpio_mask, mask, bits);
 
@@ -60,7 +66,7 @@ static int ch341_spi_set_pins(struct ch341_device *ch341, u32 mask, u32 bits)
 	u32 old_data;
 
 	mask &= ch341->spi_mask;
-	bits &= ch341->spi_mask;
+	bits &= mask;
 
 	old_data = set_mask_bits(&ch341->gpio_data, mask, bits);
 
@@ -183,26 +189,80 @@ static int ch341_spi_transfer_one(struct spi_controller *ctlr,
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_SPI_SPIDEV)
+static int ch341_spi_create_spidev(struct ch341_device *ch341)
+{
+	struct spi_controller *ctlr = ch341->spi;
+	struct spi_device *spidevs[CH341_NUM_CHIPSELECT];
+	int i, ret;
+
+	struct spi_board_info info = {
+		.modalias = "m53cpld",
+		.max_speed_hz = 1000000,
+		.bus_num = ctlr->bus_num,
+		.chip_select = 0,
+		.mode = SPI_MODE_0,
+	};
+
+	for (i = 0; i < ARRAY_SIZE(spidevs); i++) {
+		info.chip_select = i;
+		spidevs[i] = spi_new_device(ctlr, &info);
+		if (!spidevs[i]) {
+			dev_warn(CH341_DEV, "Failed to create spidev\n");
+			ret = -ENODEV;
+			goto cleanup;
+		}
+	}
+
+	return 0;
+
+cleanup:
+	while(--i) {
+		spi_unregister_device(spidevs[i]);
+                spidevs[i] = NULL;
+	}
+	return ret;
+}
+#else
+static int ch341_spi_create_spidev(struct ch341_device *ch341)
+{
+	return 0;
+}
+#endif
+
 int ch341_spi_probe(struct ch341_device *ch341)
 {
 	struct spi_controller *ctlr;
-	struct fwnode_handle *fwnode;
+	struct fwnode_handle *fwnode = NULL;
+	u32 num_chipselect = CH341_NUM_CHIPSELECT;
 	int ret;
 
-	fwnode = ch341_get_compatible_fwnode(ch341, "wch,ch341-spi");
-	if (!fwnode) {
-		dev_info(CH341_DEV, "SPI controller disabled\n");
-		return 0;
-	}
+	/* child DT node required when using parent DT */
+	if (CH341_DEV->fwnode) {
+		fwnode = ch341_get_compatible_fwnode(ch341, "wch-ic,ch341-spi");
+		if (!fwnode) {
+			dev_info(CH341_DEV, "SPI controller disabled (no DT node found)\n");
+			return 0;
+		}
 
+		ret = fwnode_property_read_u32(fwnode, "num-cs", &num_chipselect);
+		if (ret)
+			dev_warn(CH341_DEV, "Invalid num-cs: %d\n", ret);
+
+		if (num_chipselect == 0) {
+			dev_info(CH341_DEV, "SPI controller disabled (num-cs=0)\n");
+			return 0;
+		}
+	}
+	
 	ctlr = devm_spi_alloc_host(CH341_DEV, 0);
 	if (!ctlr)
 		return -ENOMEM;
 
 	ctlr->dev.fwnode = fwnode;
-	if (fwnode && is_of_node(fwnode)) {
+	if (fwnode && is_of_node(fwnode))
 		ctlr->dev.of_node = to_of_node(fwnode);
-	}
+
 	// TODO bitbanged streaming protocol: SPI_CPHA ?
 	// TODO hardware supported: SPI_TX_DUAL | SPI_RX_DUAL;
 	ctlr->mode_bits = SPI_CPOL | SPI_CPHA | SPI_3WIRE | SPI_LSB_FIRST | SPI_NO_CS | SPI_CS_HIGH;
@@ -219,44 +279,58 @@ int ch341_spi_probe(struct ch341_device *ch341)
 	ctlr->bits_per_word_mask = SPI_BPW_MASK(8);
 	ctlr->min_speed_hz = 400;
 	ctlr->max_speed_hz = 1e6;
-	ctlr->num_chipselect = 3; // TODO dynamic DT
+	ctlr->num_chipselect = num_chipselect;
 	ctlr->set_cs = ch341_spi_set_cs;
 	ctlr->prepare_message = ch341_spi_prepare_message;
 	ctlr->unprepare_message = ch341_spi_unprepare_message;
 	ctlr->transfer_one = ch341_spi_transfer_one;
+
 	spi_controller_set_devdata(ctlr, ch341);
 
 	/* reserve SPI pins, except DOUT2 which isn't implemented (dual TX) */
-	ch341->spi_mask = GENMASK(5, 0) & ~CH341_DOUT2;
-	set_mask_bits(&ch341->gpio_mask, ch341->spi_mask, ch341->spi_mask);
+	ch341->spi_mask = CH341_DIN | CH341_DCK | CH341_DOUT |
+			  GENMASK(ctlr->num_chipselect - 1, 0);
+	set_mask_bits(&ch341->gpio_mask, ch341->spi_mask, ch341->spi_mask & CH341_OUT_MASK);
 	/* all CS HIGH CS by default */
-	set_mask_bits(&ch341->gpio_data, ch341->spi_mask, (1 << ctlr->num_chipselect) - 1);
+	set_mask_bits(&ch341->gpio_data, ch341->spi_mask, GENMASK(ctlr->num_chipselect - 1, 0));
 
-	ch341->spi_ctlr = ctlr;
+	ch341->spi = ctlr;
 
 	ret = devm_spi_register_controller(CH341_DEV, ctlr);
 	if (ret) {
-		if (fwnode)
-			fwnode_handle_put(fwnode);
-		ch341->spi_ctlr = NULL;
-		return ret;
+		dev_err(CH341_DEV, "Failed to register SPI controller: %d\n", ret);
+		goto err_free_spi;
 	}
 
-	dev_info(CH341_DEV, "SPI registered with %d chip selects\n", ctlr->num_chipselect);
+	/* only create spidev when there is no DT (assumed hot-plugged)
+	 * developer can add wanted spidev in DT */
+	if (!fwnode) ch341_spi_create_spidev(ch341);
 
 	return 0;
+
+err_free_spi:
+	if (fwnode) fwnode_handle_put(fwnode);
+	spi_controller_set_devdata(ctlr, NULL);
+	devm_kfree(CH341_DEV, ctlr);
+	ch341->spi = NULL;
+	return ret;
 }
 
 void ch341_spi_remove(struct ch341_device *ch341)
 {
 	struct fwnode_handle *fwnode;
 
-	if (!ch341->spi_ctlr)
+	if (!ch341->spi)
 		return;
 
-	fwnode = ch341->spi_ctlr->dev.fwnode;
-	if (fwnode)
-		fwnode_handle_put(fwnode);
+	fwnode = ch341->spi->dev.fwnode;
+	if (fwnode) fwnode_handle_put(fwnode);
 
-	ch341->spi_ctlr = NULL;
+	spi_controller_set_devdata(ch341->spi, NULL);
+
+	/* not required since using devm_*:
+	 * unregister spi controller
+	 * kfree(ch341->spi); */
+
+	ch341->spi = NULL;
 }

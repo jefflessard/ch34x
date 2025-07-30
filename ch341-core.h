@@ -95,9 +95,10 @@ struct ch341_device {
 	struct usb_device *udev;
 	struct usb_interface *intf;
 	struct gpio_chip *gpio_chip;
-	struct spi_controller *spi_ctlr;
+	struct spi_controller *spi;
 	struct i2c_adapter *i2c;
 	struct usb_anchor anchor;
+	spinlock_t lock; /* protect against interweaved write-read usb transfers */
 
 	/* USB transfer pipes */
 	unsigned int tx_pipe;

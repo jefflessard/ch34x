@@ -84,7 +84,7 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 		void *context)
 {
 	struct ch341_transfer *xfer;
-	int ret;
+	int tx_ret = 0, rx_ret = 0;
 
 	if (!rx_urb && !tx_urb)
 		return -ENOENT;
@@ -101,6 +101,7 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 		tx_urb->complete = ch341_urb_complete;
 		tx_urb->context = xfer;
 		atomic_inc(&xfer->pending_urbs);
+		usb_anchor_urb(tx_urb, &ch341->anchor);
 	}
 
 	/* Setup TX URB */
@@ -111,6 +112,7 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 		rx_urb->complete = ch341_urb_complete;
 		rx_urb->context = xfer;
 		atomic_inc(&xfer->pending_urbs);
+		usb_anchor_urb(rx_urb, &ch341->anchor);
 	}
 
 	/* Setup transfer */
@@ -124,36 +126,35 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 	}
 
 	/* Submit both URBs simultaneously for full-duplex */
-	if (tx_urb) {
-		usb_anchor_urb(tx_urb, &ch341->anchor);
-		ret = usb_submit_urb(tx_urb, GFP_KERNEL);
-		if (ret) {
-			dev_err(CH341_DEV, "failed to submit tx urb: %d\n", ret);
-
-			usb_unanchor_urb(tx_urb);
-			tx_urb->context = NULL;
-			if (rx_urb) rx_urb->context = NULL;
-			kfree(xfer);
-			return ret;
-		}
+	scoped_guard(spinlock, &ch341->lock) {
+		if (tx_urb)
+			tx_ret = usb_submit_urb(tx_urb, GFP_KERNEL);
+		if (rx_urb && !tx_ret)
+			rx_ret = usb_submit_urb(rx_urb, GFP_KERNEL);
 	}
 
-	if (rx_urb) {
-		usb_anchor_urb(rx_urb, &ch341->anchor);
-		ret = usb_submit_urb(rx_urb, GFP_KERNEL);
-		if (ret) {
-			dev_err(CH341_DEV, "failed to submit rx urb: %d\n", ret);
+	if (tx_urb && tx_ret) {
+		dev_err(CH341_DEV, "failed to submit tx urb: %d\n", tx_ret);
 
-			if (tx_urb) {
-				usb_kill_urb(tx_urb);
-				tx_urb->context = NULL;
-			}
+		usb_unanchor_urb(tx_urb);
+		tx_urb->context = NULL;
+		if (rx_urb) rx_urb->context = NULL;
+		kfree(xfer);
+		return tx_ret;
+	}
 
-			usb_unanchor_urb(rx_urb);
-			rx_urb->context = NULL;
-			kfree(xfer);
-			return ret;
+	if (rx_urb && rx_ret) {
+		dev_err(CH341_DEV, "failed to submit rx urb: %d\n", rx_ret);
+
+		if (tx_urb) {
+			usb_kill_urb(tx_urb);
+			tx_urb->context = NULL;
 		}
+
+		usb_unanchor_urb(rx_urb);
+		rx_urb->context = NULL;
+		kfree(xfer);
+		return rx_ret;
 	}
 
 	return 0;
@@ -396,6 +397,7 @@ static int ch341_probe(struct usb_interface *interface,
 		device_set_node(CH341_DEV, fwnode);
 	}
 
+	spin_lock_init(&ch341->lock);
 	init_usb_anchor(&ch341->anchor);
 	ch341_init_device(ch341);
 
@@ -421,8 +423,16 @@ static int ch341_probe(struct usb_interface *interface,
 		goto err_spi_remove;
 	}
 
+	if (!ch341->i2c && !ch341->spi && !ch341->gpio_chip) {
+		ret = -ECHILD;
+		dev_err(dev, "No controller enabled: %d\n", ret);
+		goto err_gpio_remove;
+	}
+
 	return 0;
 
+err_gpio_remove:
+	ch341_gpio_remove(ch341);
 err_i2c_remove:
 	ch341_i2c_remove(ch341);
 err_spi_remove:
