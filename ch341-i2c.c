@@ -24,14 +24,14 @@ static inline u8 i2c_10bit_addr_lo_from_msg(const struct i2c_msg *msg)
 #define WRITE_BYTE(val) \
 	do { \
 		ch341_i2c_append_byte(cmd, pos, val); \
-		ch341_i2c_align_packet(cmd, pos); \
+		ch341_i2c_align_packet(cmd, pos, max_pkt_len); \
 	} while (0)
 
 #define COPY_BYTES(src, len) \
-	ch341_i2c_append_bytes(cmd, pos, (src), (len))
+	ch341_i2c_append_bytes(cmd, pos, (src), (len), max_pkt_len)
 
 #define PAD_PACKET() \
-	ch341_i2c_pad_packet(cmd, pos)
+	ch341_i2c_pad_packet(cmd, pos, max_pkt_len)
 
 struct ch341_i2c_msg {
 	struct completion *done;
@@ -46,17 +46,17 @@ static inline void ch341_i2c_append_byte(u8 *cmd, unsigned int *pos, u8 val)
 	(*pos)++;
 }
 
-static inline void ch341_i2c_align_packet(u8 *cmd, unsigned int *pos)
+static inline void ch341_i2c_align_packet(u8 *cmd, unsigned int *pos, unsigned int max_pkt_len)
 {
-	if (*pos % CH341_PKT_LEN == CH341_PKT_LEN - 1) {
+	if (*pos % max_pkt_len == max_pkt_len - 1) {
 		ch341_i2c_append_byte(cmd, pos, CH341_I2C_STM_END);
 		ch341_i2c_append_byte(cmd, pos, CH341_CMD_I2C_STREAM);
 	}
 }
 
-static inline void ch341_i2c_pad_packet(u8 *cmd, unsigned int *pos)
+static inline void ch341_i2c_pad_packet(u8 *cmd, unsigned int *pos, unsigned int max_pkt_len)
 {
-	u16 len = CH341_PKT_LEN - *pos % CH341_PKT_LEN;
+	u16 len = max_pkt_len - *pos % max_pkt_len;
 
 	if (len) {
 		if (cmd) memset(&cmd[*pos], CH341_I2C_STM_END, len);
@@ -65,14 +65,14 @@ static inline void ch341_i2c_pad_packet(u8 *cmd, unsigned int *pos)
 	}
 }
 
-static inline void ch341_i2c_append_bytes(u8 *cmd, unsigned int *pos, void *src, int len)
+static inline void ch341_i2c_append_bytes(u8 *cmd, unsigned int *pos, void *src, int len, unsigned int max_pkt_len)
 {
 	if (cmd) memcpy(&cmd[*pos], src, len);
 	*pos += (len);
-	ch341_i2c_align_packet(cmd, pos);
+	ch341_i2c_align_packet(cmd, pos, max_pkt_len);
 }
 
-static int ch341_i2c_build_cmd(u8 *cmd, struct i2c_msg *msgs, int num)
+static int ch341_i2c_build_cmd(u8 *cmd, struct i2c_msg *msgs, int num, unsigned int max_pkt_len)
 {
 	unsigned int cmd_len = 0, read_len = 0, msg_len, msg_qty;
 	unsigned int *pos = &cmd_len;
@@ -108,11 +108,11 @@ static int ch341_i2c_build_cmd(u8 *cmd, struct i2c_msg *msgs, int num)
 					 * sufficent room for reading length
 					 * in its corresponding rx packet */
 					if (read_len > 0 &&
-					    read_len % CH341_PKT_LEN == 0)
+					    read_len % max_pkt_len == 0)
 						PAD_PACKET();
 
-					msg_qty = umin(CH341_PKT_LEN -
-						       read_len % CH341_PKT_LEN,
+					msg_qty = umin(max_pkt_len -
+						       read_len % max_pkt_len,
 						       msg_len);
 					WRITE_BYTE(CH341_I2C_STM_IN | msg_qty);
 					msg_len -= msg_qty;
@@ -123,8 +123,8 @@ static int ch341_i2c_build_cmd(u8 *cmd, struct i2c_msg *msgs, int num)
 				msg_buf = msg->buf;
 				while (msg_len > 0) {
 					/* reserve out + end bytes */
-					msg_qty = umin(CH341_PKT_LEN -
-						       *pos % CH341_PKT_LEN - 2,
+					msg_qty = umin(max_pkt_len -
+						       *pos % max_pkt_len - 2,
 						       msg_len);
 					WRITE_BYTE(CH341_I2C_STM_OUT | msg_qty);
 					COPY_BYTES(msg_buf, msg_qty);
@@ -182,7 +182,7 @@ static int ch341_i2c_xfer(struct i2c_adapter *adapter,
 	if (!num) return -ENOENT;
 
 	/* dry run to know buffer length */
-	tx_len = ch341_i2c_build_cmd(NULL, msgs, num);
+	tx_len = ch341_i2c_build_cmd(NULL, msgs, num, ch341->max_pkt_len);
 
 	if (tx_len == 0) {
 		dev_err(CH341_DEV, "empty command/no content\n");
@@ -194,14 +194,14 @@ static int ch341_i2c_xfer(struct i2c_adapter *adapter,
 	if (!tx_urb) return -ENOMEM;
 
 	/* build command */
-	ch341_i2c_build_cmd(tx_urb->transfer_buffer, msgs, num);
+	ch341_i2c_build_cmd(tx_urb->transfer_buffer, msgs, num, ch341->max_pkt_len);
 
 	/* allocate rx buffer */
 	read_len = ch341_i2c_read_len(msgs, num);
 	if (read_len > 0) {
 		/* multiple of max usb packet length required
 		 * for mutli packet responses */
-		rx_len = ALIGN(read_len, CH341_PKT_LEN);
+		rx_len = ALIGN(read_len, ch341->max_pkt_len);
 		rx_urb = ch341_alloc_urb(ch341, NULL, rx_len);
 		if (!rx_urb) {
 			ret = -ENOMEM;

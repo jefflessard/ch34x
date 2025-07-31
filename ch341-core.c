@@ -391,6 +391,7 @@ static int ch341_probe(struct usb_interface *interface,
 
 	ch341->tx_pipe = usb_sndbulkpipe(udev, usb_endpoint_num(bulk_out));
 	ch341->rx_pipe = usb_rcvbulkpipe(udev, usb_endpoint_num(bulk_in));
+	ch341->max_pkt_len = umin(usb_endpoint_maxp(bulk_out), usb_endpoint_maxp(bulk_in));
 
 	usb_set_intfdata(interface, ch341);
 

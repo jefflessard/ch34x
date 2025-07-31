@@ -87,7 +87,9 @@ static void ch341_spi_set_cs(struct spi_device *spi, bool enable)
 
 static size_t ch341_spi_max_transfer_size(struct spi_device *spi)
 {
-	return CH341_PKT_LEN - 1;
+	struct ch341_device *ch341 = spi_controller_get_devdata(spi->controller);
+
+	return ch341->max_pkt_len - 1;
 }
 
 static int ch341_spi_prepare_message(struct spi_controller *ctlr, struct spi_message *msg)

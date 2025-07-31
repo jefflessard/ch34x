@@ -14,7 +14,6 @@
 
 #define DRIVER_NAME "ch341-bridge"
 #define CH341_TIMEOUT_MS	100
-#define CH341_PKT_LEN      	32
 
 /* CH341 pins */
 #define CH341_PIN_CS0		0  /* D0 */
@@ -112,9 +111,10 @@ struct ch341_device {
 	struct usb_anchor anchor;
 	spinlock_t lock; /* protect against interweaved write-read usb transfers */
 
-	/* USB transfer pipes */
+	/* USB bulk endpoints */
 	unsigned int tx_pipe;
 	unsigned int rx_pipe;
+	unsigned int max_pkt_len;
 
 	/* pins state tracking */
 	u32 gpio_mask;  /* Direction: 1=output, 0=input */
