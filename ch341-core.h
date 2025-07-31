@@ -14,7 +14,34 @@
 
 #define DRIVER_NAME "ch341-bridge"
 #define CH341_TIMEOUT_MS	100
-#define CH341_BUFFER_LENGTH	0x1000
+
+/* CH341 pins */
+#define CH341_PIN_CS0		0  /* D0 */
+#define CH341_PIN_CS1		1  /* D1 */
+#define CH341_PIN_CS2		2  /* D2 */
+#define CH341_PIN_DCK		3  /* D3 */
+#define CH341_PIN_DOUT2		4  /* D4 */
+#define CH341_PIN_DOUT		5  /* D5 */
+#define CH341_PIN_DIN2		6  /* D6 */
+#define CH341_PIN_DIN		7  /* D7 */
+#define CH341_PIN_TXD		8  /* TXD/ERR# */
+#define CH341_PIN_RXD		9  /* RXD/PEMP */
+#define CH341_PIN_INT		10 /* INT# */
+#define CH341_PIN_IN3		11 /* IN3/SLCT */
+/*				12    resrved */
+#define CH341_PIN_TEN		13 /* TEN/BUSY/WAIT# */
+#define CH341_PIN_ROV		14 /* ROV/AUTOFD#/DATAS#/READ# */
+#define CH341_PIN_IN7		15 /* SLCTIN#/ADDRS#/ALE */
+#define CH341_PIN_RST		16 /* RST# */
+#define CH341_PIN_RDY		17 /* WRITE# */
+#define CH341_PIN_SDL		18 /* SDL */
+#define CH341_PIN_SDA		19 /* SDA */
+
+/* In parallel port mode:
+ * - default direction is 0x000FC000
+ * - all input pins are low by default */
+#define CH341_PINS_DIR_DEFAULT	GENMASK(CH341_PIN_SDA, CH341_PIN_ROV)
+#define CH341_PINS_VAL_DEFAULT	0 
 
 /* Control Commands */
 #define CH341_CTRL_VERSION	0x5F
@@ -22,6 +49,7 @@
 #define CH341_PARA_MODE_EPP17	(0 << 8)
 #define CH341_PARA_MODE_EPP19	(1 << 8)
 #define CH341_PARA_MODE_MEM	(2 << 8)
+#define CH341_PARA_MODE_ECP	(3 << 8)
 #define CH341_PARA_MODE_KEEP	0
 #define CH341_PARA_MODE_SET	2
 	/* Initialize parallel port mode:
@@ -31,6 +59,7 @@
 	 * - 0: EPP mode/EPP mode V1.7 (default)
 	 * - 1: EPP mode V1.9
 	 * - 2: MEM mode
+	 * - 3: ECP mode
 	 * low byte:
 	 * - 0: keeps the current mode
 	 * - 2: configures specified mode */
@@ -51,12 +80,12 @@
 #define CH341_SPI_DUAL_MASK	BIT(2)
 	/* Bits 1-0: I2C speed/SCL frequency:
 	 * - 0: low speed 20KHz
-	 * - 1: standard 100KHz
+	 * - 1: standard 100KHz (default)
 	 * - 2: fast 400KHz
 	 * - 3: high speed 750KHz
 	 * Bit 2: SPI I/O number/IO pin:
-	 * - 0: single input/output (4-wire)
-	 * - 1: dual input/output (5-wire) */
+	 * - 0: 4-wire - single input/output (default)
+	 * - 1: 5-wire - dual input/output */
 
 #define CH341_I2C_STM_STA	0x74
 #define CH341_I2C_STM_STO	0x75
@@ -70,24 +99,6 @@
 #define CH341_UIO_STM_DIR	0x40
 #define CH341_UIO_STM_OUT	0x80
 #define CH341_UIO_STM_US	0xc0
-
-/* Output-only pins */
-#define CH341_GPIO_OUT_B0   GENMASK(7, 0)
-#define CH341_GPIO_OUT_B1   (GENMASK(7, 0) & ~GENMASK(5, 4))
-#define CH341_GPIO_OUT_B2   GENMASK(3, 0)
-#define CH341_GPIO_OUT_MASK (CH341_GPIO_OUT_B0 | (CH341_GPIO_OUT_B1 << 8) | (CH341_GPIO_OUT_B2 << 16))
-
-/* Input-only pins */
-#define CH341_GPIO_IN_B0   GENMASK(7, 0)
-#define CH341_GPIO_IN_B1   (GENMASK(7, 0) & ~BIT(4))
-#define CH341_GPIO_IN_B2   0
-#define CH341_GPIO_IN_MASK (CH341_GPIO_IN_B0 | (CH341_GPIO_IN_B1 << 8) | (CH341_GPIO_IN_B2 << 16))
-
-/* Available pins */
-#define CH341_GPIO_B0   (CH341_GPIO_OUT_B0 | CH341_GPIO_IN_B0)
-#define CH341_GPIO_B1   (CH341_GPIO_OUT_B1 | CH341_GPIO_IN_B1)
-#define CH341_GPIO_B2   (CH341_GPIO_OUT_B2 | CH341_GPIO_IN_B2)
-#define CH341_GPIO_MASK (CH341_GPIO_OUT_MASK | CH341_GPIO_IN_MASK)
 
 #define CH341_DEV (&ch341->intf->dev)
 
@@ -104,7 +115,7 @@ struct ch341_device {
 	unsigned int tx_pipe;
 	unsigned int rx_pipe;
 
-	/* GPIO state tracking */
+	/* pins state tracking */
 	u32 gpio_mask;  /* Direction: 1=output, 0=input */
 	u32 gpio_data;  /* Current pin values */
 	u32 spi_mask; /* Reserved SPI pins */

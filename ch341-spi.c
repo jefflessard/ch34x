@@ -1,19 +1,8 @@
 #include "ch341-core.h"
 #include <linux/bitrev.h>
 
-#define CH341_NUM_CHIPSELECT 3
-
-/* SPI Pins */
-#define CH341_CS0	BIT(0)
-#define CH341_CS1	BIT(1)
-#define CH341_CS2	BIT(2)
-#define CH341_DCK	BIT(3)
-#define CH341_DOUT2	BIT(4)
-#define CH341_DOUT	BIT(5)
-#define CH341_DIN2	BIT(6)
-#define CH341_DIN	BIT(7)
-
-#define CH341_OUT_MASK	GENMASK(5, 0)
+#define CH341_NUM_CHIPSELECT	3
+#define CH341_OUT_MASK		GENMASK(5, 0)
 
 static inline void ch341_spi_buf_bitrev8(u8 *buf, size_t len) {
     for (u8 *p = buf; p < buf + len; p++) {
@@ -105,9 +94,9 @@ static int ch341_spi_prepare_message(struct spi_controller *ctlr, struct spi_mes
 
 	/* cpol=0: start with clock low
 	   cpol=1: start with clock high */
-	dck_data = msg->spi->mode & SPI_CPOL ? CH341_DCK : 0;
+	dck_data = msg->spi->mode & SPI_CPOL ? BIT(CH341_PIN_DCK) : 0;
 
-	return ch341_spi_set_pins(ch341, CH341_DCK, dck_data);
+	return ch341_spi_set_pins(ch341, BIT(CH341_PIN_DCK), dck_data);
 }
 
 static int ch341_spi_unprepare_message(struct spi_controller *ctlr, struct spi_message *msg)
@@ -132,8 +121,8 @@ static int ch341_spi_transfer_one(struct spi_controller *ctlr,
 	dev_dbg(CH341_DEV, "%s %d\n", __func__, xfer->len);
 
 	/* disable DOUT when in 3-wire RX */
-	dout_mask = spi->mode & SPI_3WIRE && xfer->rx_buf ? 0 : CH341_DOUT;
-	ret = ch341_spi_enable_pins(ch341, CH341_DOUT, dout_mask);
+	dout_mask = spi->mode & SPI_3WIRE && xfer->rx_buf ? 0 : BIT(CH341_PIN_DOUT);
+	ret = ch341_spi_enable_pins(ch341, BIT(CH341_PIN_DOUT), dout_mask);
 	if (ret < 0)
 		dev_err(CH341_DEV, "Failed to set SPI DOUT mask: %d\n", ret);
 
@@ -288,7 +277,7 @@ int ch341_spi_probe(struct ch341_device *ch341)
 	spi_controller_set_devdata(ctlr, ch341);
 
 	/* reserve SPI pins, except DOUT2 which isn't implemented (dual TX) */
-	ch341->spi_mask = CH341_DIN | CH341_DCK | CH341_DOUT |
+	ch341->spi_mask = BIT(CH341_PIN_DIN) | BIT(CH341_PIN_DCK) | BIT(CH341_PIN_DOUT) |
 			  GENMASK(ctlr->num_chipselect - 1, 0);
 	set_mask_bits(&ch341->gpio_mask, ch341->spi_mask, ch341->spi_mask & CH341_OUT_MASK);
 	/* all CS HIGH CS by default */
@@ -296,7 +285,7 @@ int ch341_spi_probe(struct ch341_device *ch341)
 
 	ch341->spi = ctlr;
 
-	ret = devm_spi_register_controller(CH341_DEV, ctlr);
+	ret = spi_register_controller(ctlr);
 	if (ret) {
 		dev_err(CH341_DEV, "Failed to register SPI controller: %d\n", ret);
 		goto err_free_spi;
@@ -309,9 +298,9 @@ int ch341_spi_probe(struct ch341_device *ch341)
 	return 0;
 
 err_free_spi:
-	if (fwnode) fwnode_handle_put(fwnode);
 	spi_controller_set_devdata(ctlr, NULL);
-	devm_kfree(CH341_DEV, ctlr);
+	if (fwnode) fwnode_handle_put(fwnode);
+	spi_controller_put(ctlr);
 	ch341->spi = NULL;
 	return ret;
 }
@@ -323,14 +312,14 @@ void ch341_spi_remove(struct ch341_device *ch341)
 	if (!ch341->spi)
 		return;
 
+	spi_unregister_controller(ch341->spi);
+	spi_controller_set_devdata(ch341->spi, NULL);
+
 	fwnode = ch341->spi->dev.fwnode;
 	if (fwnode) fwnode_handle_put(fwnode);
 
-	spi_controller_set_devdata(ch341->spi, NULL);
-
-	/* not required since using devm_*:
-	 * unregister spi controller
-	 * kfree(ch341->spi); */
+	/* let devm clean up memory later
+	 * spi_controller_put(ctlr); */
 
 	ch341->spi = NULL;
 }

@@ -311,18 +311,17 @@ int ch341_i2c_probe(struct ch341_device *ch341)
 		goto err_free_i2c;
 	}
 
-	ret = devm_i2c_add_adapter(CH341_DEV, ch341->i2c);
+	ret = i2c_add_adapter(ch341->i2c);
 	if (ret) {
 		dev_err(CH341_DEV, "Failed to register I2C adapter: %d\n", ret);
 		goto err_free_i2c;
 	}
 
-	dev_info(CH341_DEV, "I2C adapter registered\n");
-
 	return 0;
 
 err_free_i2c:
 	i2c_set_adapdata(i2c, NULL);
+	if (fwnode) fwnode_handle_put(fwnode);
 	devm_kfree(CH341_DEV, i2c);
 	ch341->i2c = NULL;
 	return ret;
@@ -334,14 +333,14 @@ void ch341_i2c_remove(struct ch341_device *ch341) {
 	if (!ch341->i2c)
 		return;
 
+	i2c_del_adapter(ch341->i2c);
+	i2c_set_adapdata(ch341->i2c, NULL);
+
 	fwnode = ch341->i2c->dev.fwnode;
 	if (fwnode) fwnode_handle_put(fwnode);
 
-	i2c_set_adapdata(ch341->i2c, NULL);
-
-	/* not required since using devm_*:
-	 * i2c_del_adapter(ch341->i2c);
-	 * kfree(ch341->i2c); */
+	/* let devm clean up memory later
+	 * devm_kfree(CH341_DEV, ch341->i2c); */
 
 	ch341->i2c = NULL;
 }

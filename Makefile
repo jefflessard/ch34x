@@ -32,6 +32,8 @@ probe:
 	#modprobe $(MODULE_NAME)
 	#dmesg -W
 
+clean:
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
 olddefconfig:
 	$(MAKE) -C $(KDIR) olddefconfig

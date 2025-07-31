@@ -3,6 +3,26 @@
  */
 
 #include "ch341-core.h"
+#include <linux/gpio/driver.h>
+
+
+/* Output-only pins */
+#define CH341_GPIO_OUT_B0   GENMASK(7, 0)
+#define CH341_GPIO_OUT_B1   (GENMASK(7, 0) & ~GENMASK(5, 4))
+#define CH341_GPIO_OUT_B2   GENMASK(3, 0)
+#define CH341_GPIO_OUT_MASK (CH341_GPIO_OUT_B0 | (CH341_GPIO_OUT_B1 << 8) | (CH341_GPIO_OUT_B2 << 16))
+
+/* Input-only pins */
+#define CH341_GPIO_IN_B0   GENMASK(7, 0)
+#define CH341_GPIO_IN_B1   (GENMASK(7, 0) & ~BIT(4))
+#define CH341_GPIO_IN_B2   0
+#define CH341_GPIO_IN_MASK (CH341_GPIO_IN_B0 | (CH341_GPIO_IN_B1 << 8) | (CH341_GPIO_IN_B2 << 16))
+
+/* Available pins */
+#define CH341_GPIO_B0   (CH341_GPIO_OUT_B0 | CH341_GPIO_IN_B0)
+#define CH341_GPIO_B1   (CH341_GPIO_OUT_B1 | CH341_GPIO_IN_B1)
+#define CH341_GPIO_B2   (CH341_GPIO_OUT_B2 | CH341_GPIO_IN_B2)
+#define CH341_GPIO_MASK (CH341_GPIO_OUT_MASK | CH341_GPIO_IN_MASK)
 
 static const char *ch341_pin_names[] = {
 	"CS0",
@@ -303,7 +323,7 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 	}
 
 	/* Register GPIO chip */
-	ret = devm_gpiochip_add_data(CH341_DEV, gpio_chip, ch341);
+	ret = gpiochip_add_data(gpio_chip, ch341);
 	if (ret) {
 		dev_err(CH341_DEV, "Failed to register GPIO chip: %d\n", ret);
 		goto err_free_gpio;
@@ -327,13 +347,13 @@ void ch341_gpio_remove(struct ch341_device *ch341)
 	if (!ch341->gpio_chip)
 		return;
 
+	gpiochip_remove(ch341->gpio_chip);
+
 	fwnode = ch341->gpio_chip->fwnode;
 	if (fwnode) fwnode_handle_put(fwnode);
 
-
-	/* not required since using devm_*:
-	 * remove gpio chip
-	 * kfree(ch341->gpio_chip); */
+	/* let devm clean up memory later
+	 * devm_kfree(CH341_DEV, ch341->gpio_chip); */
 
 	ch341->gpio_chip = NULL;
 }

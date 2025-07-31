@@ -86,6 +86,9 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 	struct ch341_transfer *xfer;
 	int tx_ret = 0, rx_ret = 0;
 
+	if (ch341->intf->condition == USB_INTERFACE_UNBINDING)
+		return -ENODEV;
+
 	if (!rx_urb && !tx_urb)
 		return -ENOENT;
 
@@ -401,9 +404,9 @@ static int ch341_probe(struct usb_interface *interface,
 	init_usb_anchor(&ch341->anchor);
 	ch341_init_device(ch341);
 
-	/* Initialize GPIO state */
-	ch341->gpio_mask = CH341_GPIO_OUT_MASK;
-	ch341->gpio_data = 0;   /* All pins default to low */
+	/* Initial pin state */
+	ch341->gpio_mask = CH341_PINS_DIR_DEFAULT;
+	ch341->gpio_data = CH341_PINS_VAL_DEFAULT;
 
 	ret = ch341_i2c_probe(ch341);
 	if (ret) {
@@ -428,6 +431,15 @@ static int ch341_probe(struct usb_interface *interface,
 		dev_err(dev, "No controller enabled: %d\n", ret);
 		goto err_gpio_remove;
 	}
+
+#if 1
+	if (CH341_DEV->of_node) {
+		/* Populate DT children (e.g. spi-gpio) */
+		ret = of_platform_populate(CH341_DEV->of_node, NULL, NULL, CH341_DEV);
+		if (ret)
+			dev_warn(CH341_DEV, "Failed to populate child devices: %d\n", ret);
+	}
+#endif
 
 	return 0;
 
@@ -454,9 +466,15 @@ static void ch341_disconnect(struct usb_interface *interface)
 
 	usb_kill_anchored_urbs(&ch341->anchor);
 
-	ch341_i2c_remove(ch341);
-	ch341_spi_remove(ch341);
+#if 1
+	if (CH341_DEV->of_node)
+		/* Remove child devices created by of_platform_populate */
+		of_platform_depopulate(CH341_DEV);
+#endif
+
 	ch341_gpio_remove(ch341);
+	ch341_spi_remove(ch341);
+	ch341_i2c_remove(ch341);
 
 	if (CH341_DEV->fwnode)
 		fwnode_handle_put(CH341_DEV->fwnode);
