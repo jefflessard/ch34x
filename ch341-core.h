@@ -14,6 +14,7 @@
 
 #define DRIVER_NAME "ch341-bridge"
 #define CH341_TIMEOUT_MS	100
+#define CH341_PKT_LEN      	32
 
 /* CH341 pins */
 #define CH341_PIN_CS0		0  /* D0 */

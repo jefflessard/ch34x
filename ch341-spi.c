@@ -85,6 +85,11 @@ static void ch341_spi_set_cs(struct spi_device *spi, bool enable)
 	}
 }
 
+static size_t ch341_spi_max_transfer_size(struct spi_device *spi)
+{
+	return CH341_PKT_LEN - 1;
+}
+
 static int ch341_spi_prepare_message(struct spi_controller *ctlr, struct spi_message *msg)
 {
 	struct ch341_device *ch341 = spi_controller_get_devdata(msg->spi->controller);
@@ -107,6 +112,7 @@ static int ch341_spi_unprepare_message(struct spi_controller *ctlr, struct spi_m
 
 	return 0;
 }
+
 
 static int ch341_spi_transfer_one(struct spi_controller *ctlr,
 				  struct spi_device *spi,
@@ -270,6 +276,7 @@ int ch341_spi_probe(struct ch341_device *ch341)
 	ctlr->max_speed_hz = 1e6;
 	ctlr->num_chipselect = num_chipselect;
 	ctlr->set_cs = ch341_spi_set_cs;
+	ctlr->max_transfer_size = ch341_spi_max_transfer_size;
 	ctlr->prepare_message = ch341_spi_prepare_message;
 	ctlr->unprepare_message = ch341_spi_unprepare_message;
 	ctlr->transfer_one = ch341_spi_transfer_one;

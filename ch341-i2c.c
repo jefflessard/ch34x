@@ -16,7 +16,6 @@ static inline u8 i2c_10bit_addr_lo_from_msg(const struct i2c_msg *msg)
 }
 #endif
 
-#define CH341_PKT_LEN      32
 #define CH341_I2C_20KHZ     0
 #define CH341_I2C_100KHZ    1
 #define CH341_I2C_400KHZ    2
