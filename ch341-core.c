@@ -1,5 +1,18 @@
 #include "ch341-core.h"
 
+/* module parameters */
+static bool nogpio = 0;
+module_param(nogpio, bool, 0444);
+MODULE_PARM_DESC(nogpio, "Disable GPIO controller");
+
+static bool noi2c = 0;
+module_param(noi2c, bool, 0444);
+MODULE_PARM_DESC(noi2c, "Disable I2C controller");
+
+static bool nospi = 0;
+module_param(nospi, bool, 0444);
+MODULE_PARM_DESC(nospi, "Disable SPI controller");
+
 /* usb wrappers */
 struct urb *ch341_alloc_urb(struct ch341_device *ch341, void *buf, int len) {
 	struct urb *urb;
@@ -409,22 +422,28 @@ static int ch341_probe(struct usb_interface *interface,
 	ch341->gpio_mask = CH341_PINS_DIR_DEFAULT;
 	ch341->gpio_data = CH341_PINS_VAL_DEFAULT;
 
-	ret = ch341_i2c_probe(ch341);
-	if (ret) {
-		dev_err(dev, "Failed to initialize i2c: %d\n", ret);
-		goto err_put_fwnode;
+	if (!noi2c) {
+		ret = ch341_i2c_probe(ch341);
+		if (ret) {
+			dev_err(dev, "Failed to initialize i2c: %d\n", ret);
+			goto err_put_fwnode;
+		}
 	}
 
-	ret = ch341_spi_probe(ch341);
-	if (ret) {
-		dev_err(dev, "Failed to initialize spi: %d\n", ret);
-		goto err_i2c_remove;
+	if (!nospi) {
+		ret = ch341_spi_probe(ch341);
+		if (ret) {
+			dev_err(dev, "Failed to initialize spi: %d\n", ret);
+			goto err_i2c_remove;
+		}
 	}
 
-	ret = ch341_gpio_probe(ch341);
-	if (ret) {
-		dev_err(dev, "Failed to initialize gpio: %d\n", ret);
-		goto err_spi_remove;
+	if (!nogpio) {
+		ret = ch341_gpio_probe(ch341);
+		if (ret) {
+			dev_err(dev, "Failed to initialize gpio: %d\n", ret);
+			goto err_spi_remove;
+		}
 	}
 
 	if (!ch341->i2c && !ch341->spi && !ch341->gpio_chip) {
@@ -445,11 +464,14 @@ static int ch341_probe(struct usb_interface *interface,
 	return 0;
 
 err_gpio_remove:
-	ch341_gpio_remove(ch341);
+	if (!nogpio)
+		ch341_gpio_remove(ch341);
 err_i2c_remove:
-	ch341_i2c_remove(ch341);
+	if (!noi2c)
+		ch341_i2c_remove(ch341);
 err_spi_remove:
-	ch341_spi_remove(ch341);
+	if (!nospi)
+		ch341_spi_remove(ch341);
 err_put_fwnode:
 	if (CH341_DEV->fwnode)
 		fwnode_handle_put(CH341_DEV->fwnode);

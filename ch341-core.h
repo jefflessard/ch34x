@@ -37,11 +37,9 @@
 #define CH341_PIN_SDL		18 /* SDL */
 #define CH341_PIN_SDA		19 /* SDA */
 
-/* In parallel port mode:
- * - default direction is 0x000FC000
- * - all input pins are low by default */
-#define CH341_PINS_DIR_DEFAULT	GENMASK(CH341_PIN_SDA, CH341_PIN_ROV)
-#define CH341_PINS_VAL_DEFAULT	0 
+/* Parallel port mode power up values */
+#define CH341_PINS_DIR_DEFAULT	0x0FC000
+#define CH341_PINS_VAL_DEFAULT	0x0FC000
 
 /* Control Commands */
 #define CH341_CTRL_VERSION	0x5F
