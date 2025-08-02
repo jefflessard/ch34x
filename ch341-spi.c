@@ -10,22 +10,22 @@ static inline void ch341_spi_buf_bitrev8(u8 *buf, size_t len) {
     }
 }
 
-static int ch341_spi_update_pins(struct ch341_device *ch341, u32 gpio_mask, u32 gpio_data)
+static int ch341_spi_update_pins(struct ch341_device *ch341, u32 pins_dir, u32 pins_state)
 {
 	struct urb *tx_urb;
 	u8 *cmd;
 	int ret;
 
-	gpio_mask &= ch341->spi_mask & CH341_OUT_MASK;
-	gpio_data &= ch341->spi_mask & CH341_OUT_MASK;
+	pins_dir &= ch341->spi_mask & CH341_OUT_MASK;
+	pins_state &= ch341->spi_mask & CH341_OUT_MASK;
 
 	tx_urb = ch341_alloc_urb(ch341, NULL, 4);
 	if (!tx_urb) return -ENOMEM;
 	cmd = tx_urb->transfer_buffer;
 
 	cmd[0] = CH341_CMD_UIO_STREAM;
-	cmd[1] = CH341_UIO_STM_DIR | gpio_mask;
-	cmd[2] = CH341_UIO_STM_OUT | ch341->gpio_data;
+	cmd[1] = CH341_UIO_STM_DIR | pins_dir;
+	cmd[2] = CH341_UIO_STM_OUT | ch341->pins_state;
 	cmd[3] = CH341_UIO_STM_END;
 
 	ret = ch341_usb_transfer(ch341, tx_urb, NULL, ch341_complete, NULL);
@@ -42,10 +42,10 @@ static int ch341_spi_enable_pins(struct ch341_device *ch341, u32 mask, u32 bits)
 	mask &= ch341->spi_mask;
 	bits &= mask;
 
-	old_mask = set_mask_bits(&ch341->gpio_mask, mask, bits);
+	old_mask = set_mask_bits(&ch341->pins_dir, mask, bits);
 
 	if ((old_mask & mask) != bits)
-		return ch341_spi_update_pins(ch341, ch341->gpio_mask, ch341->gpio_data);
+		return ch341_spi_update_pins(ch341, ch341->pins_dir, ch341->pins_state);
 
 	return 0;
 }
@@ -57,10 +57,10 @@ static int ch341_spi_set_pins(struct ch341_device *ch341, u32 mask, u32 bits)
 	mask &= ch341->spi_mask;
 	bits &= mask;
 
-	old_data = set_mask_bits(&ch341->gpio_data, mask, bits);
+	old_data = set_mask_bits(&ch341->pins_state, mask, bits);
 
 	if ((old_data & mask) != bits)
-		return ch341_spi_update_pins(ch341, ch341->gpio_mask, ch341->gpio_data);
+		return ch341_spi_update_pins(ch341, ch341->pins_dir, ch341->pins_state);
 
 	return 0;
 }
@@ -288,9 +288,9 @@ int ch341_spi_probe(struct ch341_device *ch341)
 	/* reserve SPI pins, except DOUT2 which isn't implemented (dual TX) */
 	ch341->spi_mask = BIT(CH341_PIN_DIN) | BIT(CH341_PIN_DCK) | BIT(CH341_PIN_DOUT) |
 			  GENMASK(ctlr->num_chipselect - 1, 0);
-	set_mask_bits(&ch341->gpio_mask, ch341->spi_mask, ch341->spi_mask & CH341_OUT_MASK);
+	set_mask_bits(&ch341->pins_dir, ch341->spi_mask, ch341->spi_mask & CH341_OUT_MASK);
 	/* all CS HIGH CS by default */
-	set_mask_bits(&ch341->gpio_data, ch341->spi_mask, GENMASK(ctlr->num_chipselect - 1, 0));
+	set_mask_bits(&ch341->pins_state, ch341->spi_mask, GENMASK(ctlr->num_chipselect - 1, 0));
 
 	ch341->spi = ctlr;
 

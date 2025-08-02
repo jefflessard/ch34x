@@ -419,8 +419,8 @@ static int ch341_probe(struct usb_interface *interface,
 	ch341_init_device(ch341);
 
 	/* Initial pin state */
-	ch341->gpio_mask = CH341_PINS_DIR_DEFAULT;
-	ch341->gpio_data = CH341_PINS_VAL_DEFAULT;
+	ch341->pins_dir = CH341_PINS_DIR_DEFAULT;
+	ch341->pins_state = CH341_PINS_VAL_DEFAULT;
 
 	if (!noi2c) {
 		ret = ch341_i2c_probe(ch341);

@@ -121,8 +121,8 @@ struct ch341_device {
 	struct urb *int_in_urb;
 
 	/* pins state tracking */
-	u32 gpio_mask;  /* Direction: 1=output, 0=input */
-	u32 gpio_data;  /* Current pin values */
+	u32 pins_dir;  /* Direction: 1=output, 0=input */
+	u32 pins_state;  /* Current pin values */
 	u32 spi_mask; /* Reserved SPI pins */
 	u32 i2c_mask; /* Reserved I2C pins */
 

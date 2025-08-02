@@ -123,12 +123,12 @@ static int ch341_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
 	struct ch341_device *ch341 = gpiochip_get_data(chip);
 	u32 pin_mask = BIT(offset);
 
-	dev_dbg(CH341_DEV, "%s: %u %x\n", __func__, offset, !!(pin_mask & ch341->gpio_mask));
+	dev_dbg(CH341_DEV, "%s: %u %x\n", __func__, offset, !!(pin_mask & ch341->pins_dir));
 
 	if (pin_mask & ~ch341_gpio_valid_mask(ch341))
 		return -EPERM;
 
-	if (pin_mask & ch341->gpio_mask)
+	if (pin_mask & ch341->pins_dir)
 		return GPIO_LINE_DIRECTION_OUT;
 	else
 		return GPIO_LINE_DIRECTION_IN;
@@ -146,11 +146,11 @@ static int ch341_gpio_direction_input(struct gpio_chip *chip, unsigned int offse
 	if (pin_mask & ~ch341_gpio_valid_mask(ch341))
 		return -EPERM;
 
-	old_mask = set_mask_bits(&ch341->gpio_mask, pin_mask, 0);
+	old_mask = set_mask_bits(&ch341->pins_dir, pin_mask, 0);
 
 	/* if pin was output */
 	if (pin_mask & old_mask)
-		ret = ch341_gpio_write_outputs(ch341, ch341->gpio_mask, ch341->gpio_data);
+		ret = ch341_gpio_write_outputs(ch341, ch341->pins_dir, ch341->pins_state);
 
 	return ret;
 }
@@ -168,12 +168,12 @@ static int ch341_gpio_direction_output(struct gpio_chip *chip, unsigned int offs
 	if (pin_mask & ~ch341_gpio_valid_mask(ch341))
 		return -EPERM;
 
-	old_mask = set_mask_bits(&ch341->gpio_mask, pin_mask, pin_mask);
-	old_data = set_mask_bits(&ch341->gpio_data, pin_mask, pin_bits);
+	old_mask = set_mask_bits(&ch341->pins_dir, pin_mask, pin_mask);
+	old_data = set_mask_bits(&ch341->pins_state, pin_mask, pin_bits);
 
 	/* if either pin was input or data changed */
 	if (pin_mask & ~old_mask || (old_data & pin_mask) != pin_bits)
-		ret = ch341_gpio_write_outputs(ch341, ch341->gpio_mask, ch341->gpio_data);
+		ret = ch341_gpio_write_outputs(ch341, ch341->pins_dir, ch341->pins_state);
 
 	return ret;
 }
@@ -187,14 +187,14 @@ static int ch341_gpio_get_multiple(struct gpio_chip *chip, unsigned long *mask, 
 	if (*mask & ~ch341_gpio_valid_mask(ch341))
 		return -EPERM;
 
-	if (*mask & ch341->gpio_mask)
+	if (*mask & ch341->pins_dir)
 		return -EINVAL;
 
 	ret = ch341_gpio_get_status(ch341, &status);
 	if (ret < 0)
 		return ret;
 
-	ch341->gpio_data = status;
+	ch341->pins_state = status;
 
 	/* Return requested bits */
 	*bits = status & *mask;
@@ -214,7 +214,7 @@ static int ch341_gpio_get(struct gpio_chip *chip, unsigned int offset)
 static int ch341_gpio_set_multiple_rv(struct gpio_chip *chip, unsigned long *mask, unsigned long *bits)
 {
 	struct ch341_device *ch341 = gpiochip_get_data(chip);
-	u32 output_mask = READ_ONCE(ch341->gpio_mask);
+	u32 output_mask = READ_ONCE(ch341->pins_dir);
 	u32 old_data;
 	int ret = 0;
 
@@ -226,11 +226,11 @@ static int ch341_gpio_set_multiple_rv(struct gpio_chip *chip, unsigned long *mas
 	if (*mask & ~output_mask)
 		return -EINVAL;
 
-	old_data = set_mask_bits(&ch341->gpio_data, *mask, *bits);
+	old_data = set_mask_bits(&ch341->pins_state, *mask, *bits);
 
 	/* if data changed */
 	if ((old_data & *mask) != (*bits & *mask))
-		ret = ch341_gpio_write_outputs(ch341, ch341->gpio_mask, ch341->gpio_data);
+		ret = ch341_gpio_write_outputs(ch341, ch341->pins_dir, ch341->pins_state);
 
 	return ret;
 }
@@ -348,12 +348,12 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 	ch341->gpio_chip = gpio_chip;
 
 	/* Sync GPIO state */
-	ret = ch341_gpio_write_outputs(ch341, ch341->gpio_mask, ch341->gpio_data);
+	ret = ch341_gpio_write_outputs(ch341, ch341->pins_dir, ch341->pins_state);
 	if (ret < 0) {
 		dev_err(CH341_DEV, "Failed to set default state: %d\n", ret);
 		goto err_free_gpio;
 	}
-	ret = ch341_gpio_get_status(ch341, &ch341->gpio_data);
+	ret = ch341_gpio_get_status(ch341, &ch341->pins_state);
 	if (ret < 0) {
 		dev_err(CH341_DEV, "Failed to read state: %d\n", ret);
 		goto err_free_gpio;
