@@ -30,7 +30,7 @@ static int ch341_spi_update_pins(struct ch341_device *ch341, u32 pins_dir, u32 p
 
 	ret = ch341_usb_transfer(ch341, tx_urb, NULL, ch341_complete, NULL);
 	if (ret < 0)
-		dev_err(CH341_DEV, "Failed to update SPI pins: %d\n", ret);
+		dev_err(ch341->dev, "Failed to update SPI pins: %d\n", ret);
 
 	return 0;
 }
@@ -70,7 +70,7 @@ static void ch341_spi_set_cs(struct spi_device *spi, bool enable)
 	struct ch341_device *ch341 = spi_controller_get_devdata(spi->controller);
 	u32 cs_bit, cs_data;
 
-	dev_dbg(CH341_DEV, "%s %d %d\n", __func__, spi_get_chipselect(spi, 0), enable);
+	dev_dbg(ch341->dev, "%s %d %d\n", __func__, spi_get_chipselect(spi, 0), enable);
 
 	if (!(spi->mode & SPI_NO_CS)) {
 		cs_bit = BIT(spi_get_chipselect(spi, 0));
@@ -97,7 +97,7 @@ static int ch341_spi_prepare_message(struct spi_controller *ctlr, struct spi_mes
 	struct ch341_device *ch341 = spi_controller_get_devdata(msg->spi->controller);
 	u32 dck_data;
 
-	dev_dbg(CH341_DEV, "%s %x\n", __func__, msg->spi->mode);
+	dev_dbg(ch341->dev, "%s %x\n", __func__, msg->spi->mode);
 
 	/* cpol=0: start with clock low
 	   cpol=1: start with clock high */
@@ -110,7 +110,7 @@ static int ch341_spi_unprepare_message(struct spi_controller *ctlr, struct spi_m
 {
 	struct ch341_device *ch341 = spi_controller_get_devdata(msg->spi->controller);
 
-	dev_dbg(CH341_DEV, "%s\n", __func__);
+	dev_dbg(ch341->dev, "%s\n", __func__);
 
 	return 0;
 }
@@ -126,13 +126,13 @@ static int ch341_spi_transfer_one(struct spi_controller *ctlr,
 	u8 *cmd;
 	int ret;
 
-	dev_dbg(CH341_DEV, "%s %d\n", __func__, xfer->len);
+	dev_dbg(ch341->dev, "%s %d\n", __func__, xfer->len);
 
 	/* disable DOUT when in 3-wire RX */
 	dout_mask = spi->mode & SPI_3WIRE && xfer->rx_buf ? 0 : BIT(CH341_PIN_DOUT);
 	ret = ch341_spi_enable_pins(ch341, BIT(CH341_PIN_DOUT), dout_mask);
 	if (ret < 0)
-		dev_err(CH341_DEV, "Failed to set SPI DOUT mask: %d\n", ret);
+		dev_err(ch341->dev, "Failed to set SPI DOUT mask: %d\n", ret);
 
 	/* tx bounce buffer required to prepend CH341 SPI stream command */
 	tx_urb = ch341_alloc_urb(ch341, NULL, xfer->len + 1);
@@ -205,7 +205,7 @@ static int ch341_spi_create_spidev(struct ch341_device *ch341)
 		info.chip_select = i;
 		spidevs[i] = spi_new_device(ctlr, &info);
 		if (!spidevs[i]) {
-			dev_warn(CH341_DEV, "Failed to create spidev\n");
+			dev_warn(ch341->dev, "Failed to create spidev\n");
 			ret = -ENODEV;
 			goto cleanup;
 		}
@@ -235,24 +235,24 @@ int ch341_spi_probe(struct ch341_device *ch341)
 	int ret;
 
 	/* child DT node required when using parent DT */
-	if (CH341_DEV->fwnode) {
+	if (ch341->dev->fwnode) {
 		fwnode = ch341_get_compatible_fwnode(ch341, "wch-ic,ch341-spi");
 		if (!fwnode) {
-			dev_info(CH341_DEV, "SPI controller disabled (no DT node found)\n");
+			dev_info(ch341->dev, "SPI controller disabled (no DT node found)\n");
 			return 0;
 		}
 
 		ret = fwnode_property_read_u32(fwnode, "num-cs", &num_chipselect);
 		if (ret)
-			dev_warn(CH341_DEV, "Invalid num-cs: %d\n", ret);
+			dev_warn(ch341->dev, "Invalid num-cs: %d\n", ret);
 
 		if (num_chipselect == 0) {
-			dev_info(CH341_DEV, "SPI controller disabled (num-cs=0)\n");
+			dev_info(ch341->dev, "SPI controller disabled (num-cs=0)\n");
 			return 0;
 		}
 	}
 	
-	ctlr = devm_spi_alloc_host(CH341_DEV, 0);
+	ctlr = devm_spi_alloc_host(ch341->dev, 0);
 	if (!ctlr)
 		return -ENOMEM;
 
@@ -296,7 +296,7 @@ int ch341_spi_probe(struct ch341_device *ch341)
 
 	ret = spi_register_controller(ctlr);
 	if (ret) {
-		dev_err(CH341_DEV, "Failed to register SPI controller: %d\n", ret);
+		dev_err(ch341->dev, "Failed to register SPI controller: %d\n", ret);
 		goto err_free_spi;
 	}
 

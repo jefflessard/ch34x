@@ -61,20 +61,20 @@ static void ch341_urb_complete(struct urb *urb)
 
 	/* check results */
 	if (urb->status) {
-		dev_err(CH341_DEV, "usb_submit_urb failed: %d\n", urb->status);
+		dev_err(ch341->dev, "usb_submit_urb failed: %d\n", urb->status);
 		xfer->status = urb->status;
 	} else if (urb == xfer->tx_urb && urb->transfer_buffer_length != urb->actual_length) {
-		dev_err(CH341_DEV, "usb_submit_urb tx length mismatch: %d, %d\n", urb->transfer_buffer_length, urb->actual_length);
+		dev_err(ch341->dev, "usb_submit_urb tx length mismatch: %d, %d\n", urb->transfer_buffer_length, urb->actual_length);
 		xfer->status = -ENXIO;
 	} else {
-		dev_dbg(CH341_DEV, "usb_submit_urb completed\n");
+		dev_dbg(ch341->dev, "usb_submit_urb completed\n");
 
 		if (urb == xfer->rx_urb) {
-			dev_dbg(CH341_DEV, "rx %d bytes: %*ph\n", urb->actual_length, urb->actual_length, urb->transfer_buffer);
+			dev_dbg(ch341->dev, "rx %d bytes: %*ph\n", urb->actual_length, urb->actual_length, urb->transfer_buffer);
 		}
 	}
 
-	dev_dbg(CH341_DEV, "transfer remaining %d\n", remaining);
+	dev_dbg(ch341->dev, "transfer remaining %d\n", remaining);
 
 	/* Call user callback only when ALL URBs complete */
 	if (remaining == 0) {
@@ -111,7 +111,7 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 
 	/* Setup TX URB */
 	if (tx_urb) {
-		dev_dbg(CH341_DEV, "%s: tx %u bytes %*ph\n", __func__, tx_urb->transfer_buffer_length, tx_urb->transfer_buffer_length, tx_urb->transfer_buffer);
+		dev_dbg(ch341->dev, "%s: tx %u bytes %*ph\n", __func__, tx_urb->transfer_buffer_length, tx_urb->transfer_buffer_length, tx_urb->transfer_buffer);
 
 		tx_urb->pipe = ch341->tx_pipe;
 		tx_urb->complete = ch341_urb_complete;
@@ -122,7 +122,7 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 
 	/* Setup TX URB */
 	if (rx_urb) {
-		dev_dbg(CH341_DEV, "%s: rx %u bytes\n", __func__, rx_urb->transfer_buffer_length);
+		dev_dbg(ch341->dev, "%s: rx %u bytes\n", __func__, rx_urb->transfer_buffer_length);
 
 		rx_urb->pipe = ch341->rx_pipe;
 		rx_urb->complete = ch341_urb_complete;
@@ -150,7 +150,7 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 	}
 
 	if (tx_urb && tx_ret) {
-		dev_err(CH341_DEV, "failed to submit tx urb: %d\n", tx_ret);
+		dev_err(ch341->dev, "failed to submit tx urb: %d\n", tx_ret);
 
 		usb_unanchor_urb(tx_urb);
 		tx_urb->context = NULL;
@@ -160,7 +160,7 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 	}
 
 	if (rx_urb && rx_ret) {
-		dev_err(CH341_DEV, "failed to submit rx urb: %d\n", rx_ret);
+		dev_err(ch341->dev, "failed to submit rx urb: %d\n", rx_ret);
 
 		if (tx_urb) {
 			usb_kill_urb(tx_urb);
@@ -236,7 +236,7 @@ int ch341_stream_config(struct ch341_device *ch341, u8 mask, u8 bits)
 
 	ret = ch341_usb_transfer(ch341, tx_urb, NULL, ch341_complete, NULL);
 	if (ret < 0)
-		dev_err(CH341_DEV, "Failed to set I2C speed: %d\n", ret);
+		dev_err(ch341->dev, "Failed to set I2C speed: %d\n", ret);
 
 	return 0;
 }
@@ -246,10 +246,10 @@ struct fwnode_handle* ch341_get_compatible_fwnode(struct ch341_device *ch341, co
 {
 	struct fwnode_handle *child, *result = NULL;
 
-	if (!CH341_DEV->fwnode)
+	if (!ch341->dev->fwnode)
 		return NULL;
 
-	fwnode_for_each_available_child_node(CH341_DEV->fwnode, child) {
+	fwnode_for_each_available_child_node(ch341->dev->fwnode, child) {
 		if (fwnode_device_is_compatible(child, compatible)) {
 			result = child;
 		}
@@ -273,7 +273,7 @@ static int ch341_control_read(struct ch341_device *ch341, u8 request,
 			      value, index, data, size, CH341_TIMEOUT_MS);
 
 	if (ret < 0)
-		dev_err(CH341_DEV, "Control read failed: %d\n", ret);
+		dev_err(ch341->dev, "Control read failed: %d\n", ret);
 
 	return ret;
 }
@@ -289,7 +289,7 @@ static int ch341_control_write(struct ch341_device *ch341, u8 request,
 			      value, index, data, size, CH341_TIMEOUT_MS);
 
 	if (ret < 0)
-		dev_err(CH341_DEV, "Control write failed: %d\n", ret);
+		dev_err(ch341->dev, "Control write failed: %d\n", ret);
 
 	return ret;
 }
@@ -301,7 +301,7 @@ static int ch341_init_device(struct ch341_device *ch341)
 	u16 init_cmd = CH341_PARA_MODE_MEM | CH341_PARA_MODE_SET;
 	ret = ch341_control_write(ch341, CH341_CTRL_PARA_INIT, init_cmd, 0, NULL, 0);
 	if (ret < 0) {
-		dev_err(CH341_DEV, "Device initialization failed\n");
+		dev_err(ch341->dev, "Device initialization failed\n");
 		return ret;
 	}
 
@@ -309,11 +309,11 @@ static int ch341_init_device(struct ch341_device *ch341)
 	ret = ch341_control_read(ch341, CH341_CTRL_VERSION, 0, 0,
 				 &ch341->ic_version, sizeof(ch341->ic_version));
 	if (ret < 0) {
-		dev_warn(CH341_DEV, "Failed to get version\n");
+		dev_warn(ch341->dev, "Failed to get version\n");
 		ch341->ic_version = 0;
 	}
 
-	dev_info(CH341_DEV, "CH341 version 0x%04x\n", ch341->ic_version);
+	dev_info(ch341->dev, "CH341 version 0x%04x\n", ch341->ic_version);
 
 	return 0;
 }
@@ -393,6 +393,7 @@ static int ch341_probe(struct usb_interface *interface,
 	if (!ch341)
 		return -ENOMEM;
 
+	ch341->dev = dev;
 	ch341->udev = usb_get_dev(udev);
 	ch341->intf = interface;
 
@@ -410,8 +411,8 @@ static int ch341_probe(struct usb_interface *interface,
 
 	fwnode = ch341_find_usb_fwnode(ch341->udev);
 	if (fwnode) {
-		dev_info(CH341_DEV, "Found USB DT node\n");
-		device_set_node(CH341_DEV, fwnode);
+		dev_info(ch341->dev, "Found USB DT node\n");
+		device_set_node(ch341->dev, fwnode);
 	}
 
 	spin_lock_init(&ch341->lock);
@@ -452,11 +453,11 @@ static int ch341_probe(struct usb_interface *interface,
 		goto err_gpio_remove;
 	}
 
-	if (CH341_DEV->of_node) {
+	if (ch341->dev->of_node) {
 		/* Populate DT children (e.g. spi-gpio) */
-		ret = of_platform_populate(CH341_DEV->of_node, NULL, NULL, CH341_DEV);
+		ret = of_platform_populate(ch341->dev->of_node, NULL, NULL, ch341->dev);
 		if (ret)
-			dev_warn(CH341_DEV, "Failed to populate child devices: %d\n", ret);
+			dev_warn(ch341->dev, "Failed to populate child devices: %d\n", ret);
 	}
 
 	return 0;
@@ -471,10 +472,13 @@ err_spi_remove:
 	if (!nospi)
 		ch341_spi_remove(ch341);
 err_put_fwnode:
-	if (CH341_DEV->fwnode)
-		fwnode_handle_put(CH341_DEV->fwnode);
+	if (ch341->dev->fwnode)
+		fwnode_handle_put(ch341->dev->fwnode);
 err_put_dev:
 	usb_put_dev(ch341->udev);
+	ch341->intf = NULL;
+	ch341->udev = NULL;
+	ch341->dev = NULL;
 	return ret;
 }
 
@@ -487,19 +491,23 @@ static void ch341_disconnect(struct usb_interface *interface)
 
 	usb_kill_anchored_urbs(&ch341->anchor);
 
-	if (CH341_DEV->of_node)
+	if (ch341->dev->of_node)
 		/* Remove child devices created by of_platform_populate */
-		of_platform_depopulate(CH341_DEV);
+		of_platform_depopulate(ch341->dev);
 
 	ch341_gpio_remove(ch341);
 	ch341_spi_remove(ch341);
 	ch341_i2c_remove(ch341);
 
-	if (CH341_DEV->fwnode)
-		fwnode_handle_put(CH341_DEV->fwnode);
+	if (ch341->dev->fwnode)
+		fwnode_handle_put(ch341->dev->fwnode);
 
 	usb_set_intfdata(interface, NULL);
 	usb_put_dev(ch341->udev);
+
+	ch341->intf = NULL;
+	ch341->udev = NULL;
+	ch341->dev = NULL;
 }
 
 static const struct usb_device_id ch341_table[] = {

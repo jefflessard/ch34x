@@ -185,7 +185,7 @@ static int ch341_i2c_xfer(struct i2c_adapter *adapter,
 	tx_len = ch341_i2c_build_cmd(NULL, msgs, num, ch341->max_pkt_len);
 
 	if (tx_len == 0) {
-		dev_err(CH341_DEV, "empty command/no content\n");
+		dev_err(ch341->dev, "empty command/no content\n");
 		return  -ENOENT;
 	}
 
@@ -215,7 +215,7 @@ static int ch341_i2c_xfer(struct i2c_adapter *adapter,
 
 	if (rx_urb) {
 		if (rx_urb->actual_length != read_len) {
-			dev_err(CH341_DEV, "read length mismatch: %d expected, %d received\n", read_len, rx_urb->actual_length);
+			dev_err(ch341->dev, "read length mismatch: %d expected, %d received\n", read_len, rx_urb->actual_length);
 			ret = -ENXIO;
 			goto free_urbs;
 		}
@@ -266,15 +266,15 @@ int ch341_i2c_probe(struct ch341_device *ch341)
 	u8 speed = CH341_I2C_100KHZ;
 	int ret;
 
-	if (CH341_DEV->fwnode) {
+	if (ch341->dev->fwnode) {
 		fwnode = ch341_get_compatible_fwnode(ch341, "wch-ic,ch341-i2c");
 		if (!fwnode) {
-			dev_info(CH341_DEV, "I2C adapter disabled (no DT node found)\n");
+			dev_info(ch341->dev, "I2C adapter disabled (no DT node found)\n");
 			return 0;
 		}
 	}
 
-	i2c = devm_kzalloc(CH341_DEV, sizeof(*i2c), GFP_KERNEL);
+	i2c = devm_kzalloc(ch341->dev, sizeof(*i2c), GFP_KERNEL);
 	if (!i2c)
 		return -ENOMEM;
 
@@ -284,7 +284,7 @@ int ch341_i2c_probe(struct ch341_device *ch341)
 
 	i2c->owner = THIS_MODULE;
 	i2c->algo = &ch341_i2c_algo;
-	i2c->dev.parent = CH341_DEV;
+	i2c->dev.parent = ch341->dev;
 	snprintf(i2c->name, sizeof(i2c->name), "ch341-i2c");
 
 	i2c_set_adapdata(i2c, ch341);
@@ -306,13 +306,13 @@ int ch341_i2c_probe(struct ch341_device *ch341)
 	}
 	ret = ch341_stream_config(ch341, CH341_I2C_SPEED_MASK, speed);
 	if (ret) {
-		dev_err(CH341_DEV, "Failed to configure I2C adapter frequency: %d\n", ret);
+		dev_err(ch341->dev, "Failed to configure I2C adapter frequency: %d\n", ret);
 		goto err_free_i2c;
 	}
 
 	ret = i2c_add_adapter(ch341->i2c);
 	if (ret) {
-		dev_err(CH341_DEV, "Failed to register I2C adapter: %d\n", ret);
+		dev_err(ch341->dev, "Failed to register I2C adapter: %d\n", ret);
 		goto err_free_i2c;
 	}
 
@@ -321,7 +321,7 @@ int ch341_i2c_probe(struct ch341_device *ch341)
 err_free_i2c:
 	i2c_set_adapdata(i2c, NULL);
 	if (fwnode) fwnode_handle_put(fwnode);
-	devm_kfree(CH341_DEV, i2c);
+	devm_kfree(ch341->dev, i2c);
 	ch341->i2c = NULL;
 	return ret;
 }
@@ -339,7 +339,7 @@ void ch341_i2c_remove(struct ch341_device *ch341) {
 	if (fwnode) fwnode_handle_put(fwnode);
 
 	/* let devm clean up memory later
-	 * devm_kfree(CH341_DEV, ch341->i2c); */
+	 * devm_kfree(ch341->dev, ch341->i2c); */
 
 	ch341->i2c = NULL;
 }

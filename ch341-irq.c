@@ -34,7 +34,7 @@ static void ch341_irq_handle(struct ch341_device *ch341, u32 current_state)
 	/* Find changed pins */
 	changed_pins = current_state ^ ch341->pins_state;
 
-	dev_dbg(CH341_DEV, "%s: prev=%x, new=%x, changed=%lx\n", __func__, ch341->pins_state, current_state, changed_pins);
+	dev_dbg(ch341->dev, "%s: prev=%x, new=%x, changed=%lx\n", __func__, ch341->pins_state, current_state, changed_pins);
 
 	/* Update GPIO state */
 	ch341->pins_state = current_state;
@@ -46,7 +46,7 @@ static void ch341_irq_handle(struct ch341_device *ch341, u32 current_state)
 	scoped_guard(raw_spinlock_irq, &lock) {
 		/* Handle interrupts for each changed pin */
 		for_each_set_bit(pin, &changed_pins, CH341_PIN_END) {
-			dev_dbg(CH341_DEV, "Triggering virtual IRQ for pin %u\n", pin);
+			dev_dbg(ch341->dev, "Triggering virtual IRQ for pin %u\n", pin);
 
 			generic_handle_domain_irq(ch341->gpio_chip->irq.domain, pin);
 		}
@@ -59,7 +59,7 @@ static void ch341_irq_complete_interrupt(struct urb *urb)
 	u32 state;
 	u8 *buf;
 
-	dev_dbg(CH341_DEV, "%s: status=%d, len=%d data=%*ph\n", __func__, urb->status, urb->actual_length, urb->actual_length, urb->transfer_buffer);
+	dev_dbg(ch341->dev, "%s: status=%d, len=%d data=%*ph\n", __func__, urb->status, urb->actual_length, urb->actual_length, urb->transfer_buffer);
 
 	buf = urb->transfer_buffer;
 
@@ -83,7 +83,7 @@ static void ch341_irq_mask(struct irq_data *data)
 	struct gpio_chip *gc = irq_data_get_irq_chip_data(data);
 	struct ch341_device *ch341 = gpiochip_get_data(gc);
 
-	dev_dbg(CH341_DEV, "IRQ %u (pin %lu) masked\n", data->irq, data->hwirq);
+	dev_dbg(ch341->dev, "IRQ %u (pin %lu) masked\n", data->irq, data->hwirq);
 
 	gpiochip_disable_irq(gc, data->hwirq);
 }
@@ -95,7 +95,7 @@ static void ch341_irq_unmask(struct irq_data *data)
 
 	gpiochip_enable_irq(gc, data->hwirq);
 
-	dev_dbg(CH341_DEV, "IRQ %u (pin %lu) unmasked\n", data->irq, data->hwirq);
+	dev_dbg(ch341->dev, "IRQ %u (pin %lu) unmasked\n", data->irq, data->hwirq);
 }
 
 static const struct irq_chip ch341_irq_chip = {
@@ -117,7 +117,7 @@ int ch341_irq_probe(struct ch341_device *ch341)
 
 	ret = usb_find_int_in_endpoint(ch341->intf->cur_altsetting, &int_in);
 	if (ret) {
-		dev_err(CH341_DEV, "interrupt input USB endpoint not found\n");
+		dev_err(ch341->dev, "interrupt input USB endpoint not found\n");
 		return ret;
 	}
 
@@ -148,7 +148,7 @@ int ch341_irq_probe(struct ch341_device *ch341)
 
 	ret = usb_submit_urb(ch341->int_in_urb, GFP_KERNEL);
 	if (ret) {
-		dev_err(CH341_DEV, "Failed to submit interrupt urb: %d\n", ret);
+		dev_err(ch341->dev, "Failed to submit interrupt urb: %d\n", ret);
 		goto err_free_urb;
 	}
 

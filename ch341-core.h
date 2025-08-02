@@ -102,25 +102,25 @@ enum {
 #define CH341_UIO_STM_OUT	0x80
 #define CH341_UIO_STM_US	0xc0
 
-#define CH341_DEV (&ch341->intf->dev)
 
 struct ch341_device {
+	struct device *dev;
 	struct usb_device *udev;
 	struct usb_interface *intf;
 	struct gpio_chip *gpio_chip;
 	struct spi_controller *spi;
 	struct i2c_adapter *i2c;
-	struct usb_anchor anchor;
-	spinlock_t lock; /* protect against interweaved write-read usb transfers */
-	struct delayed_work state_poll_work;
 
 	/* USB endpoints */
+	struct urb *int_in_urb;
+	struct usb_anchor anchor;
+	unsigned int max_pkt_len;
 	unsigned int tx_pipe;
 	unsigned int rx_pipe;
-	unsigned int max_pkt_len;
-	struct urb *int_in_urb;
+	spinlock_t lock; /* protect against interweaved write-read usb transfers */
 
 	/* pins state tracking */
+	struct delayed_work state_poll_work;
 	u32 pins_dir;  /* Direction: 1=output, 0=input */
 	u32 pins_state;  /* Current pin values */
 	u32 spi_mask; /* Reserved SPI pins */
