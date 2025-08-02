@@ -138,7 +138,7 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 	xfer->complete = complete;
 	xfer->context = context;
 	if (WARN_ON(!xfer->complete)) {
-		xfer->complete = ch341_complete;
+		xfer->complete = ch341_usb_transfer_complete;
 	}
 
 	/* Submit both URBs simultaneously for full-duplex */
@@ -234,7 +234,7 @@ int ch341_stream_config(struct ch341_device *ch341, u8 mask, u8 bits)
 	cmd[1] = CH341_I2C_STM_SET | ch341->stream_config;
 	cmd[2] = CH341_I2C_STM_END;
 
-	ret = ch341_usb_transfer(ch341, tx_urb, NULL, ch341_complete, NULL);
+	ret = ch341_usb_transfer(ch341, tx_urb, NULL, ch341_usb_transfer_complete, NULL);
 	if (ret < 0)
 		dev_err(ch341->dev, "Failed to set I2C speed: %d\n", ret);
 

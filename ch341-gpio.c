@@ -114,7 +114,7 @@ static int ch341_gpio_write_outputs(struct ch341_device *ch341, u32 mask, u32 da
 	cmd[9] = 0;
 	cmd[10] = 0;
 
-	return ch341_usb_transfer(ch341, tx, NULL, ch341_complete, NULL);
+	return ch341_usb_transfer(ch341, tx, NULL, ch341_usb_transfer_complete, NULL);
 }
 
 /* GPIO chip operations */

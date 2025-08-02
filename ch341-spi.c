@@ -28,7 +28,7 @@ static int ch341_spi_update_pins(struct ch341_device *ch341, u32 pins_dir, u32 p
 	cmd[2] = CH341_UIO_STM_OUT | ch341->pins_state;
 	cmd[3] = CH341_UIO_STM_END;
 
-	ret = ch341_usb_transfer(ch341, tx_urb, NULL, ch341_complete, NULL);
+	ret = ch341_usb_transfer(ch341, tx_urb, NULL, ch341_usb_transfer_complete, NULL);
 	if (ret < 0)
 		dev_err(ch341->dev, "Failed to update SPI pins: %d\n", ret);
 

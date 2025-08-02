@@ -175,7 +175,7 @@ int ch341_usb_transfer(struct ch341_device *dev,
 		void (*complete)(struct ch341_transfer *xfer),
 		void *context);
 
-static inline void ch341_complete(struct ch341_transfer *xfer)
+static inline void ch341_usb_transfer_complete(struct ch341_transfer *xfer)
 {
 	if (xfer->tx_urb) ch341_free_urb(xfer->tx_urb);
 	if (xfer->rx_urb) ch341_free_urb(xfer->rx_urb);
