@@ -447,7 +447,7 @@ static int ch341_probe(struct usb_interface *interface,
 		}
 	}
 
-	if (!ch341->i2c && !ch341->spi && !ch341->gpio_chip) {
+	if (!ch341->i2c && !ch341->spi && !ch341->gpio) {
 		ret = -ECHILD;
 		dev_err(dev, "No controller enabled: %d\n", ret);
 		goto err_gpio_remove;

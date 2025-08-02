@@ -48,7 +48,7 @@ static void ch341_irq_handle(struct ch341_device *ch341, u32 current_state)
 		for_each_set_bit(pin, &changed_pins, CH341_PIN_END) {
 			dev_dbg(ch341->dev, "Triggering virtual IRQ for pin %u\n", pin);
 
-			generic_handle_domain_irq(ch341->gpio_chip->irq.domain, pin);
+			generic_handle_domain_irq(ch341->gpio->irq.domain, pin);
 		}
 	}
 }
@@ -136,7 +136,7 @@ int ch341_irq_probe(struct ch341_device *ch341)
 			 int_in->bInterval);
 
 	/* Configure the GPIO IRQ chip */
-	girq = &ch341->gpio_chip->irq;
+	girq = &ch341->gpio->irq;
 	gpio_irq_chip_set_chip(girq, &ch341_irq_chip);
 	girq->parent_handler = NULL;  /* We handle muxing ourselves */
 	girq->num_parents = 0;

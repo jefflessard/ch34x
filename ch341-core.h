@@ -107,7 +107,7 @@ struct ch341_device {
 	struct device *dev;
 	struct usb_device *udev;
 	struct usb_interface *intf;
-	struct gpio_chip *gpio_chip;
+	struct gpio_chip *gpio;
 	struct spi_controller *spi;
 	struct i2c_adapter *i2c;
 

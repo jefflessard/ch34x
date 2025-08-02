@@ -345,7 +345,7 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 	gpio_chip->set_rv = ch341_gpio_set_rv;
 	gpio_chip->set_multiple_rv = ch341_gpio_set_multiple_rv;
 #endif
-	ch341->gpio_chip = gpio_chip;
+	ch341->gpio = gpio_chip;
 
 	/* Sync GPIO state */
 	ret = ch341_gpio_write_outputs(ch341, ch341->pins_dir, ch341->pins_state);
@@ -380,7 +380,7 @@ err_irq_remove:
 err_free_gpio:
 	if (fwnode) fwnode_handle_put(fwnode);
 	devm_kfree(ch341->dev, gpio_chip);
-	ch341->gpio_chip = NULL;
+	ch341->gpio = NULL;
 	return ret;
 }
 
@@ -388,18 +388,18 @@ void ch341_gpio_remove(struct ch341_device *ch341)
 {
 	struct fwnode_handle *fwnode;
 
-	if (!ch341->gpio_chip)
+	if (!ch341->gpio)
 		return;
 
-	gpiochip_remove(ch341->gpio_chip);
+	gpiochip_remove(ch341->gpio);
 
 	ch341_irq_remove(ch341);
 
-	fwnode = ch341->gpio_chip->fwnode;
+	fwnode = ch341->gpio->fwnode;
 	if (fwnode) fwnode_handle_put(fwnode);
 
 	/* let devm clean up memory later
-	 * devm_kfree(ch341->dev, ch341->gpio_chip); */
+	 * devm_kfree(ch341->dev, ch341->gpio); */
 
-	ch341->gpio_chip = NULL;
+	ch341->gpio = NULL;
 }
