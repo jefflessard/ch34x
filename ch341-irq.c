@@ -61,14 +61,22 @@ static void ch341_irq_complete_interrupt(struct urb *urb)
 
 	dev_dbg(ch341->dev, "%s: status=%d, len=%d data=%*ph\n", __func__, urb->status, urb->actual_length, urb->actual_length, urb->transfer_buffer);
 
+	if (urb->status) {
+		dev_err(ch341->dev, "interrupt in failed: %d\n", urb->status);
+		return;
+	}
+
 	buf = urb->transfer_buffer;
 
 	state = (buf[3] << 16) |
-		 (buf[1] << 8) |
-		 (buf[2]);
+		(buf[1] <<  8) |
+		(buf[2] <<  0);
 
 	ch341_irq_handle(ch341, state);
-	
+
+	if (ch341->intf->condition == USB_INTERFACE_UNBINDING)
+		return;
+
 	/* Schedule delayed work to update state after GPIOs settle */
 	if (state_poll > 0) {
 		schedule_delayed_work(&ch341->state_poll_work,
