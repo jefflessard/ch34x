@@ -33,13 +33,6 @@ static inline u8 i2c_10bit_addr_lo_from_msg(const struct i2c_msg *msg)
 #define PAD_PACKET() \
 	ch341_i2c_pad_packet(cmd, pos, max_pkt_len)
 
-struct ch341_i2c_msg {
-	struct completion *done;
-	struct i2c_msg *msg;
-	atomic_t *pending;
-	int status;
-};
-
 static inline void ch341_i2c_append_byte(u8 *cmd, unsigned int *pos, u8 val)
 {
 	if (cmd) cmd[*pos] = (val) & 0xFF;

@@ -13,7 +13,7 @@ static unsigned int state_poll = 100;
 module_param(state_poll, uint, 0644);
 MODULE_PARM_DESC(state_poll, "GPIO state polling refresh delay in ms (default: 100, 0 to disable)");
 
-static void ch341_state_poll_state(struct work_struct *work)
+static void ch341_irq_poll_state(struct work_struct *work)
 {
 	struct ch341_device *ch341 = container_of(work, struct ch341_device, state_poll_work.work);
 
@@ -152,7 +152,7 @@ int ch341_irq_probe(struct ch341_device *ch341)
 	girq->default_type = IRQ_TYPE_NONE;
 	girq->handler = handle_simple_irq;
 
-	INIT_DELAYED_WORK(&ch341->state_poll_work, ch341_state_poll_state);
+	INIT_DELAYED_WORK(&ch341->state_poll_work, ch341_irq_poll_state);
 
 	ret = usb_submit_urb(ch341->int_in_urb, GFP_KERNEL);
 	if (ret) {

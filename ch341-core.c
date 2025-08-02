@@ -177,7 +177,7 @@ int ch341_usb_transfer(struct ch341_device *ch341,
 }
 
 /* sync/wait completion */
-static void ch341_sync_complete(struct ch341_transfer *xfer)
+static void ch341_usb_transfer_wait_complete(struct ch341_transfer *xfer)
 {
     struct completion *done = xfer->context;
     complete(done);
@@ -189,7 +189,7 @@ int ch341_usb_transfer_wait(struct ch341_device *dev,
 	DECLARE_COMPLETION_ONSTACK(done);
 	int ret;
 	
-	ret = ch341_usb_transfer(dev, tx_urb, rx_urb, ch341_sync_complete, &done);
+	ret = ch341_usb_transfer(dev, tx_urb, rx_urb, ch341_usb_transfer_wait_complete, &done);
 	if (ret) return ret;
 
 	if (!wait_for_completion_timeout(&done, msecs_to_jiffies(CH341_TIMEOUT_MS))) {
