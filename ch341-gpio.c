@@ -24,6 +24,9 @@
 #define CH341_GPIO_B2   (CH341_GPIO_OUT_B2 | CH341_GPIO_IN_B2)
 #define CH341_GPIO_MASK (CH341_GPIO_OUT_MASK | CH341_GPIO_IN_MASK)
 
+/* Open-drain pins */
+#define CH341_GPIO_OPEN_DRAIN	(BIT(CH341_PIN_SCL) | BIT(CH341_PIN_SDA))
+
 static const char *ch341_pin_names[] = {
 	"CS0",
 	"CS1",
@@ -43,7 +46,7 @@ static const char *ch341_pin_names[] = {
 	"IN7",
 	"RST",
 	"RDY",
-	"SDL",
+	"SCL",
 	"SDA",
 };
 
@@ -55,7 +58,7 @@ static inline u32 ch341_gpio_valid_mask(struct ch341_device *ch341)
 
 /* CH341a GPIO commands */
 /* Get current status of all pins */
-static int ch341_gpio_get_status(struct ch341_device *ch341, u32 *status)
+int ch341_gpio_get_status(struct ch341_device *ch341, u32 *status)
 {
 	struct urb *tx = ch341_alloc_urb(ch341, NULL, 1);
 	struct urb *rx = ch341_alloc_urb(ch341, NULL, 6);
@@ -258,12 +261,44 @@ static int ch341_gpio_init_valid_mask(struct gpio_chip *chip,
 
 	dev_dbg(CH341_DEV, "%s %lx %d\n", __func__, *valid_mask, ngpios);
 
-	if (ngpios != fls(CH341_GPIO_MASK))
+	if (ngpios != CH341_PIN_END)
 		return -EINVAL;
 
 	*valid_mask = ch341_gpio_valid_mask(ch341);
 
 	return 0;
+}
+
+static int ch341_gpio_set_config(struct gpio_chip *chip, unsigned int offset,
+				 unsigned long config)
+{
+	struct ch341_device *ch341 = gpiochip_get_data(chip);
+	enum pin_config_param param = pinconf_to_config_param(config);
+	bool is_open_drain;
+
+	if (BIT(offset) & ~ch341_gpio_valid_mask(ch341))
+		return -EPERM;
+
+	is_open_drain = !!(BIT(offset) & CH341_GPIO_OPEN_DRAIN);
+
+	switch (param) {
+		case PIN_CONFIG_DRIVE_OPEN_DRAIN:
+			if (is_open_drain) return 0;
+			dev_warn(CH341_DEV, "pin %u is hardware push-pull\n",
+				offset);
+			return -ENOTSUPP;
+
+		case PIN_CONFIG_DRIVE_PUSH_PULL:
+			if (!is_open_drain) return 0;
+			dev_warn(CH341_DEV, "pin %u is hardware open-drain\n",
+				offset);
+			return -ENOTSUPP;
+
+		default:
+			dev_warn(CH341_DEV, "invalid config %u for pin %u\n",
+				 param, offset);
+			return -ENOTSUPP;
+	}
 }
 
 /* GPIO chip registration */
@@ -291,12 +326,13 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 	gpio_chip->owner = THIS_MODULE;
 	gpio_chip->fwnode = fwnode;
 	gpio_chip->base = -1;  /* Dynamic allocation */
-	gpio_chip->ngpio = fls(CH341_GPIO_MASK);
+	gpio_chip->ngpio = CH341_PIN_END;
 	gpio_chip->names = ch341_pin_names;
 	gpio_chip->can_sleep = true;  /* USB operations can sleep */
 
 	/* Set GPIO operations */
 	gpio_chip->init_valid_mask = ch341_gpio_init_valid_mask;
+	gpio_chip->set_config = ch341_gpio_set_config;
 	gpio_chip->get_direction = ch341_gpio_get_direction;
 	gpio_chip->direction_input = ch341_gpio_direction_input;
 	gpio_chip->direction_output = ch341_gpio_direction_output;
@@ -309,6 +345,7 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 	gpio_chip->set_rv = ch341_gpio_set_rv;
 	gpio_chip->set_multiple_rv = ch341_gpio_set_multiple_rv;
 #endif
+	ch341->gpio_chip = gpio_chip;
 
 	/* Sync GPIO state */
 	ret = ch341_gpio_write_outputs(ch341, ch341->gpio_mask, ch341->gpio_data);
@@ -322,6 +359,13 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 		goto err_free_gpio;
 	}
 
+	/* configure irq chip */
+	ret = ch341_irq_probe(ch341);
+	if (ret) {
+		dev_err(CH341_DEV, "Failed to initialize irq chip: %d\n", ret);
+		goto err_irq_remove;
+	}
+
 	/* Register GPIO chip */
 	ret = gpiochip_add_data(gpio_chip, ch341);
 	if (ret) {
@@ -329,10 +373,10 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 		goto err_free_gpio;
 	}
 
-	ch341->gpio_chip = gpio_chip;
-
 	return 0;
 
+err_irq_remove:
+	ch341_irq_remove(ch341);
 err_free_gpio:
 	if (fwnode) fwnode_handle_put(fwnode);
 	devm_kfree(CH341_DEV, gpio_chip);
@@ -348,6 +392,8 @@ void ch341_gpio_remove(struct ch341_device *ch341)
 		return;
 
 	gpiochip_remove(ch341->gpio_chip);
+
+	ch341_irq_remove(ch341);
 
 	fwnode = ch341->gpio_chip->fwnode;
 	if (fwnode) fwnode_handle_put(fwnode);

@@ -16,26 +16,30 @@
 #define CH341_TIMEOUT_MS	100
 
 /* CH341 pins */
-#define CH341_PIN_CS0		0  /* D0 */
-#define CH341_PIN_CS1		1  /* D1 */
-#define CH341_PIN_CS2		2  /* D2 */
-#define CH341_PIN_DCK		3  /* D3 */
-#define CH341_PIN_DOUT2		4  /* D4 */
-#define CH341_PIN_DOUT		5  /* D5 */
-#define CH341_PIN_DIN2		6  /* D6 */
-#define CH341_PIN_DIN		7  /* D7 */
-#define CH341_PIN_TXD		8  /* TXD/ERR# */
-#define CH341_PIN_RXD		9  /* RXD/PEMP */
-#define CH341_PIN_INT		10 /* INT# */
-#define CH341_PIN_IN3		11 /* IN3/SLCT */
-/*				12    resrved */
-#define CH341_PIN_TEN		13 /* TEN/BUSY/WAIT# */
-#define CH341_PIN_ROV		14 /* ROV/AUTOFD#/DATAS#/READ# */
-#define CH341_PIN_IN7		15 /* SLCTIN#/ADDRS#/ALE */
-#define CH341_PIN_RST		16 /* RST# */
-#define CH341_PIN_RDY		17 /* WRITE# */
-#define CH341_PIN_SDL		18 /* SDL */
-#define CH341_PIN_SDA		19 /* SDA */
+enum {
+	CH341_PIN_CS0	=  0, /* D0 */
+	CH341_PIN_CS1	=  1, /* D1 */
+	CH341_PIN_CS2	=  2, /* D2 */
+	CH341_PIN_DCK	=  3, /* D3 */
+	CH341_PIN_DOUT2	=  4, /* D4 */
+	CH341_PIN_DOUT	=  5, /* D5 */
+	CH341_PIN_DIN2	=  6, /* D6 */
+	CH341_PIN_DIN	=  7, /* D7 */
+	CH341_PIN_TXD	=  8, /* TXD/ERR# */
+	CH341_PIN_RXD	=  9, /* RXD/PEMP */
+	CH341_PIN_INT	= 10, /* INT# */
+	CH341_PIN_IN3	= 11, /* IN3/SLCT */
+/*			= 12,    resrved */
+	CH341_PIN_TEN	= 13, /* TEN/BUSY/WAIT# */
+	CH341_PIN_ROV	= 14, /* ROV/AUTOFD#/DATAS#/READ# */
+	CH341_PIN_IN7	= 15, /* SLCTIN#/ADDRS#/ALE */
+	CH341_PIN_RST	= 16, /* RST# */
+	CH341_PIN_RDY	= 17, /* WRITE# */
+	CH341_PIN_SCL	= 18, /* SCL */
+	CH341_PIN_SDA	= 19, /* SDA */
+
+	CH341_PIN_END	= 20,
+};
 
 /* Parallel port mode power up values */
 #define CH341_PINS_DIR_DEFAULT	0x0FC000
@@ -108,11 +112,13 @@ struct ch341_device {
 	struct i2c_adapter *i2c;
 	struct usb_anchor anchor;
 	spinlock_t lock; /* protect against interweaved write-read usb transfers */
+	struct delayed_work state_poll_work;
 
-	/* USB bulk endpoints */
+	/* USB endpoints */
 	unsigned int tx_pipe;
 	unsigned int rx_pipe;
 	unsigned int max_pkt_len;
+	struct urb *int_in_urb;
 
 	/* pins state tracking */
 	u32 gpio_mask;  /* Direction: 1=output, 0=input */
@@ -145,11 +151,14 @@ struct ch341_transfer {
 int ch341_spi_probe(struct ch341_device *ch341);
 void ch341_spi_remove(struct ch341_device *ch341);
 
+int ch341_i2c_probe(struct ch341_device *ch341);
+void ch341_i2c_remove(struct ch341_device *ch341);
+
 int ch341_gpio_probe(struct ch341_device *ch341);
 void ch341_gpio_remove(struct ch341_device *ch341);
 
-int ch341_i2c_probe(struct ch341_device *ch341);
-void ch341_i2c_remove(struct ch341_device *ch341);
+int ch341_irq_probe(struct ch341_device *ch341);
+void ch341_irq_remove(struct ch341_device *ch341);
 
 /* shared functions */
 int ch341_stream_config(struct ch341_device *ch341, u8 mask, u8 bits);

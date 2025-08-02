@@ -5,6 +5,7 @@ MODULE_NAME = ch341-bridge
 obj-m += $(MODULE_NAME).o
 $(MODULE_NAME)-objs += ch341-core.o
 $(MODULE_NAME)-objs += ch341-gpio.o
+$(MODULE_NAME)-objs += ch341-irq.o
 $(MODULE_NAME)-objs += ch341-spi.o
 $(MODULE_NAME)-objs += ch341-i2c.o
 

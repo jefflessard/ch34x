@@ -452,14 +452,12 @@ static int ch341_probe(struct usb_interface *interface,
 		goto err_gpio_remove;
 	}
 
-#if 1
 	if (CH341_DEV->of_node) {
 		/* Populate DT children (e.g. spi-gpio) */
 		ret = of_platform_populate(CH341_DEV->of_node, NULL, NULL, CH341_DEV);
 		if (ret)
 			dev_warn(CH341_DEV, "Failed to populate child devices: %d\n", ret);
 	}
-#endif
 
 	return 0;
 
@@ -489,11 +487,9 @@ static void ch341_disconnect(struct usb_interface *interface)
 
 	usb_kill_anchored_urbs(&ch341->anchor);
 
-#if 1
 	if (CH341_DEV->of_node)
 		/* Remove child devices created by of_platform_populate */
 		of_platform_depopulate(CH341_DEV);
-#endif
 
 	ch341_gpio_remove(ch341);
 	ch341_spi_remove(ch341);
