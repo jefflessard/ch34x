@@ -125,14 +125,14 @@
 
 #### CMD_SPI_STREAM (0xA8)
 
-**USB Endpoint:** BULK_OUT (command+data) → BULK_IN (response)  
-**Description:** Performs SPI data transfer using the currently configured GPIO[5:0] as SPI lines. The actual SPI transfer behavior (chip select, clock polarity, I/O direction, etc.) is determined by the state of these GPIO pins, which must be explicitly configured using `CMD_UIO_STREAM` subcommands prior to issuing the SPI stream command.
+**USB Endpoint:** BULK_OUT (command+payload) → BULK_IN (response)  
+**Description:** Performs SPI data transfer using the currently configured GPIO[5:0] as SPI lines. The actual SPI transfer behavior (chip select, clock polarity, I/O direction, etc.) is determined by the state of these GPIO pins, which must be configured using `CMD_UIO_STREAM` subcommands prior to issuing the SPI stream command.
 
 **Parameters:**  
 | Byte | Value       | Field        | Description                       |
 |------|-------------|--------------|-----------------------------------|
 | 0    | 0xA8        | Command      | SPI transfer start                |
-| 1-N  | Data Bytes  | SPI Write Bytes | MOSI data to write to DOUT/DOUT2. Up to 32 bytes, LSB-first. |
+| 1-N  | Data Bytes  | SPI Write Bytes | MOSI data to write to DOUT/DOUT2. Up to 31 bytes, LSB-first. |
 
 **Response:**  
 *Only supports full-duplex streaming. The number of bytes read always matches the number of written bytes.*  
@@ -160,10 +160,12 @@ SPI bus lines and protocol options are actively controlled via the state and dir
 | 3    | DCK    | SPI Clock                  |
 | 4    | DOUT2  | Dual Output (not always used) |
 | 5    | DOUT   | MOSI (output)              |
+| 6    | DIN2   | Dual Input (not always used) |
+| 7    | DIN    | MISO (input)              |
 
 **CPOL (Clock Polarity) and 3-wire (Half-duplex) Support:**  
 - **CPOL:** Set DCK (GPIO3) output level for idle state (low for CPOL=0, high for CPOL=1) before issuing the SPI stream.  
-- **3-wire (Half-duplex):** Change DOUT (GPIO5) direction between input and output using UIO_STM_DIR. For RX, set DOUT as input; for TX, set as output. *Note: DIN pin is always used as MISO to read data, no matter if DOUT is set to input mode.*  
+- **3-wire (Half-duplex):** Change DOUT (GPIO5) direction between input and output using UIO_STM_DIR. For RX, set DOUT as input (high impedance) ; for TX, set as output. *Note: DIN pin is always used as MISO to read data, no matter if DOUT is set to input mode.*  
 - The state and direction of each pin **at the time the SPI stream is issued** determines the SPI protocol behavior.  
 
 **Chip Select Handling:**  
@@ -215,13 +217,13 @@ SPI bus lines and protocol options are actively controlled via the state and dir
 **No Response**  
 
 ##### I2C_STM_SET (0x60)
-**Description:** Sets I²C bus speed configuration  
+**Description:** Sets I²C bus speed and SPI single/dual mode configuration  
 | Byte | Value     | Field        | Description          |
 |------|-----------|--------------|----------------------|
 | 0    | 0xAA      | Stream Code  | Always 0xAA        |
-| 1    | 0x60      | Subcommand   |  |
-| 2    | 0x00-0x03 | I²C Speed    | **I²C clock rate:**<br>- 0x00: 20 kHz<br>- 0x01: 100 kHz<br>- 0x02: 400 kHz<br>- 0x03: 750 kHz |
-|      | Bit 7     | SPI Mode     | **SPI Mode:**<br>- 0: SPI single io<br>- 1: SPI dual io|
+| 1    | 0x60 \| mask | Subcommand   |  |
+|      | Bits [1:0] | I²C Speed    | I²C clock rate:<br>- 0x00: 20 kHz<br>- 0x01: 100 kHz<br>- 0x02: 400 kHz<br>- 0x03: 750 kHz |
+|      | Bit 2     | SPI Dual Mode | SPI Dual Mode:<br>- 0: SPI single I/O<br>- 1: SPI dual I/O |
 
 **No Response**
 
