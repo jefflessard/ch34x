@@ -198,87 +198,99 @@ SPI bus lines and protocol options are actively controlled via the state and dir
 
 ##### I2C_STM_US (0x40)
 **Description:** Sets I²C delay in microseconds  
-| Byte | Value | Description                 |
-|------|-------|-----------------------------|
-| 0    | 0xAA  | Stream code                 |
-| 1    | 0x40  | Microsecond delay subcommand|
-| 2    | Delay | Delay value (1-15 µs)       |
+| Byte | Value | Description       |
+|------|-------|-------------------|
+| 0    | 0xAA  | Stream code       |
+| ..   | ..    | Other subcommands |
+| n    | 0x40 \| delay_us | Microsecond delay subcommand|
+|      | bits [3:0] | Delay value (1-15 µs)       |
+| ..   | ..    | Other subcommands |
 
 **No Response**  
 
 ##### I2C_STM_MS (0x50)
 **Description:** Sets I²C delay in milliseconds  
-| Byte | Value | Description                 |
-|------|-------|-----------------------------|
-| 0    | 0xAA  | Stream code                 |
-| 1    | 0x50  | Millisecond delay subcommand|
-| 2    | Delay | Delay value (1-15 ms)       |
+| Byte | Value | Description       |
+|------|-------|-------------------|
+| 0    | 0xAA  | Stream code       |
+| ..   | ..    | Other subcommands |
+| n    | 0x50 \| delay_ms | Millisecond delay subcommand|
+|      | bits [3:0] | Delay value (1-15 ms)       |
+| ..   | ..    | Other subcommands |
 
 **No Response**  
 
 ##### I2C_STM_SET (0x60)
 **Description:** Sets I²C bus speed and SPI single/dual mode configuration  
-| Byte | Value     | Field        | Description          |
-|------|-----------|--------------|----------------------|
-| 0    | 0xAA      | Stream Code  | Always 0xAA        |
-| 1    | 0x60 \| mask | Subcommand   |  |
-|      | Bits [1:0] | I²C Speed    | I²C clock rate:<br>- 0x00: 20 kHz<br>- 0x01: 100 kHz<br>- 0x02: 400 kHz<br>- 0x03: 750 kHz |
-|      | Bit 2     | SPI Dual Mode | SPI Dual Mode:<br>- 0: SPI single I/O<br>- 1: SPI dual I/O |
+| Byte | Value        | Field        | Description |
+|------|--------------|--------------|----------------|
+| 0    | 0xAA         | Stream Code  | Always 0xAA        |
+| ..   | ..           | ..           | Other subcommands |
+| n    | 0x60 \| mask | Subcommand   |  |
+|      | Bits [1:0]   | I²C Speed    | I²C clock rate:<br>- 0x00: 20 kHz<br>- 0x01: 100 kHz<br>- 0x02: 400 kHz<br>- 0x03: 750 kHz |
+|      | Bit 2        | SPI Dual Mode | SPI Dual Mode:<br>- 0: SPI single I/O<br>- 1: SPI dual I/O |
+| ..   | ..           | ..           | Other subcommands |
 
 **No Response**
 
 ##### I2C_STM_STA (0x74)
 **Description:** Generates I²C start condition  
-| Byte | Value       | Field        | Description          |
-|------|-------------|--------------|----------------------|
-| 0    | 0xAA        | Stream Code  | Always 0xAA          |
-| 1    | 0x74        | Subcommand   | Start condition      |
-| 2    | Unused      | -            | Must be 0x00         |
+| Byte | Value  | Description       |
+|------|--------|-------------------|
+| 0    | 0xAA   | Stream Code       |
+| ..   | ..     | Other subcommands |
+| n    | 0x74   | Start condition   |
+| ..   | ..     | Other subcommands |
 
 **No Response**
 
 ##### I2C_STM_STO (0x75)
 **Description:** Generates I²C stop condition  
-| Byte | Value       | Field        | Description          |
-|------|-------------|--------------|----------------------|
-| 0    | 0xAA        | Stream Code  | Always 0xAA          |
-| 1    | 0x75        | Subcommand   | Stop condition       |
-| 2    | Unused      | -            | Must be 0x00         |
+| Byte | Value  | Description       |
+|------|--------|-------------------|
+| 0    | 0xAA   | Stream Code       |
+| ..   | ..     | Other subcommands |
+| n    | 0x75   | Stop condition    |
+| ..   | ..     | Other subcommands |
 
 **No Response**
 
 ##### I2C_STM_OUT (0x80)
 **Description:** Writes I²C data bytes  
-| Byte | Value       | Field        | Description          |
-|------|-------------|--------------|----------------------|
-| 0    | 0xAA        | Stream Code  | Always 0xAA          |
-| 1    | 0x80        | Subcommand   | Data write           |
-| 2    | Len Byte    | Byte Count   | Number of bytes to write (N) |
-| 3-N  | Data Bytes  | Payload      | Up to 31 bytes       |
+| Byte | Value       | Field        | Description |
+|------|-------------|--------------|-----------------|
+| 0    | 0xAA        | Stream Code  | Always 0xAA |
+| ..   | ..          | ..           | Other subcommands |
+| n    | 0x80 \| len | Subcommand   | I2C data write   |
+|      | bits [4-0]  | Byte Count   | Number of bytes to write (up to 29) |
+| n+1..n+29 | Data Bytes | Payload  | Up to 29 bytes |
+| ..   | ..          | ..           | Other subcommands |
 
 **No Response**
 
 ##### I2C_STM_IN (0xC0)
 **Description:** Reads I²C data bytes  
-| Byte | Value       | Field        | Description          |
-|------|-------------|--------------|----------------------|
-| 0    | 0xAA        | Stream Code  | Always 0xAA          |
-| 1    | 0xC0        | Subcommand   | Data read            |
-| 2    | Len Byte    | Byte Count   | Number of bytes to read (N) |
+| Byte | Value       | Field        | Description |
+|------|-------------|--------------|-----------------|
+| 0    | 0xAA        | Stream Code  | Always 0xAA |
+| ..   | ..          | ..           | Other subcommands |
+| n    | 0xC0 \| len | Subcommand   | I2C data read   |
+|      | bits [5-0]  | Byte Count   | Number of bytes to read (up to 32) |
+| ..   | ..          | ..           | Other subcommands |
 
-**Response:** via BULK_IN (N bytes)
+**Response:** via BULK_IN (len bytes)
 
 ##### I2C_STM_END (0x00)  
-**Description:** Terminates I²C command stream sequence  
+**Description:** Terminates I²C command stream sequence. Also used as padding.  
 **Parameters:**  
-| Byte | Value       | Field        | Description          |
-|------|-------------|--------------|----------------------|
-| 0    | 0xAA        | Stream Code  | Always 0xAA          |
-| 1    | 0x00        | Subcommand   | End sequence         |
-| 2    | Unused      | -            | Must be 0x00         |
+| Byte | Value  | Description       |
+|------|--------|-------------------|
+| 0    | 0xAA   | Stream Code       |
+| ..   | ..     | Other subcommands |
+| N    | 0x00   | End sequence      |
 
 **Behavior:**  
-- Required as final entry in all I²C command sequences  
+- Required as final entry in all I²C command sequences or as padding to align on packet size 
 - Marks end of transaction buffer  
 - No response generated  
 - Must follow SET/STA/STO/OUT/IN subcommands  
