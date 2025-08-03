@@ -45,7 +45,7 @@
 
 #### CMD_GET_STATUS (0xA0)
 **USB Endpoint:** BULK_OUT (1 byte command) → BULK_IN (6-byte response)  
-**Description:** Reads parallel port status, GPIO states, and interface flags.  
+**Description:** Reads parallel port mode GPIO states.  
 
 **Response Structure:**  
 | Byte | Bit | Pin | Description     |
@@ -70,15 +70,16 @@
 |      | 1   | D17 | RDY#, STB#, WR# |
 |      | 2   | D18 | SCL             |
 |      | 3   | D19 | SDA             |
-|      | [7:4] | - | Reserved        |
+|      | [5:4] | - | Reserved        |
+|      | 6   | D18 | Mirrors bit 2 (SCL) |
+|      | 7   | D19 | Mirrors bit 3 (SDA) |
 | 3    | [7:0] | - | Reserved        |
 | 4    | [7:0] | - | Reserved        |
 | 5    | [7:0] | - | Reserved        |
 
 **Notes:**  
 - Status: 0=low, 1=high
-- Available for both input and output direction pins
-- Interrupt detection requires prior configuration via SET_OUTPUT command  
+- Available for both input and output direction pins  
 
 ---
 
