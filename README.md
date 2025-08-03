@@ -92,13 +92,20 @@
 |------|-------------|------------------|-----------------|
 | 0    | 0xA1        | Command code     | Always 0xA1     |
 | 1    | 0x6A        | Fixed value      | Always 0x6A     |
-| 2    | Mask        | Output Enable    | Selects GPIO banks for update:<br>- **bits [1:0]**: fixed to 0b11<br>- **bit 2**: 0b1 to update bytes 3-4<br>- **bit 3**: 0b1 to update bytes 5-6<br>- **bit 4**: 0b1 to set byte 7<br>- **bits [7:5]**: fixed to 0b000<br>(1=enable update, 0=no change) |
-| 3    | Data Byte 1 | GPIO Data [15:8] | Output values for D15-D8: 0=low, 1=high |
+| 2    | Mask:       | Output Update Mask | Selects GPIO banks for update: |
+|      | Bits [1:0]  | Update Enabled | fixed to 0b11    |
+|      | Bit 2       | Update D15-9  | 0b1 to update D15-8 (bytes 3-4)<br>(1=enable update, 0=no change) |
+|      | Bit 3       | Update D7-0   | 0b1 to update D7-0 (bytes 5-6)<br>(1=enable update, 0=no change) |
+|      | Bit 4       | Update D19-16 | 0b1 to update D19-16 (byte 5)<br>(1=enable update, 0=no change) |
+|      | Bits [7-5]  | Padding       | fixed to 0b000   |
+| 3    | Data Byte 1 | GPIO State [15:8] | Output values for D15-D8: 0=low, 1=high |
 | 4    | Dir Byte 1  | GPIO Dir [15:8]  | Direction control for D15-D8: 0=input, 1=output |
-| 5    | Data Byte 2 | GPIO Data [7:0]  | Output values for D7-D0: 0=low, 1=high |
+| 5    | Data Byte 2 | GPIO State [7:0]  | Output values for D7-D0: 0=low, 1=high |
 | 6    | Dir Byte 2  | GPIO Dir [7:0]   | Direction control for D7-D0: 0=input, 1=output |
-| 7    | Data Byte 3 | GPIO Data [19:16] | **bits [3:0]**: Output values for D19-D16 (output only pins)<br>**bits [7:4]**: padding |
-| 8-10 | 0x00        | Padding         | Unused   |
+| 7    | Data Byte 3 |                  |        |
+|      | Bits [3:0] | GPIO State [19:16] | Output values for D19-D16: 0=low, 1=high (output only pins) |
+|      | Bits [7:4] | Padding          | Unused |
+| 8-10 | 0x00        | Padding         | Unused |
 
 **Output-Only Pins:**  
 | GPIO | Signal | Description          |
