@@ -1,10 +1,10 @@
 ### CH341A USB Bridge Chip Interface Documentation
 
-**Maximum Values:**  
-- EPP/MEM transfers: 31 bytes  
-- SPI transfers: 32 bytes  
-- I²C addresses: 2-byte (EEPROM >256 bytes)  
-- Interrupt detection: 8 GPIO channels  (CH347 only) 
+**Maximum Transfer Sizes:**  
+- Bulk In/Out endpoints packet size: 32 bytes  
+- SPI transfers: 1 byte command + 31 bytes payload per packet  
+- I2C write: 3 bytes command minimum + 29 bytes payload maximum per packet  
+- I2C read: 32 bytes payload per packet   
 
 ---
 
@@ -25,13 +25,21 @@
 
 #### CMD_PARA_INIT (0xB1)  
 **USB Endpoint:** USB Control OUT  
-**Description:** Initializes parallel port mode (EPP or MEM).  
+**Description:** Initializes parallel port mode:  
+- reset / clear buffer
+- RST# outputs a low level pulse
+- configures specified mode
+
 **Parameters:**  
-| Byte | Value          | Description  |
-|------|----------------|--------------|
-| 0    | 0xB1           | Command code |
-| 1    | 0x00/0x01/0x02 | Mode:<br>- 0x00/0x01: EPP Mode<br>- 0x02: MEM Mode |
-| 2    | 0x02           | Fixed value  |
+| Byte | Value | Description  |
+|------|-------|--------------|
+| 0    | 0xB1  | Command code |
+| 1    | 0x00  | EPP 1.7 Mode (default) |
+|      | 0x01  | EPP 1.9 Mode |
+|      | 0x02  | MEM Mode     |
+|      | 0x03  | ECP Mode     |
+| 2    | 0x00  | Keep current mode |
+|      | 0x02  | Configures specified mode |
 
 ---
 
