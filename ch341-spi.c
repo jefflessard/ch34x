@@ -155,7 +155,8 @@ static int ch341_spi_transfer_one(struct spi_controller *ctlr,
 	if (!xfer->rx_buf) {
 		/* dummy rx buffer required */
 		rx_urb = ch341_alloc_urb(ch341, NULL, xfer->len);
-	} else if (object_is_on_stack(xfer->rx_buf)) {
+	} else if (object_is_on_stack(xfer->rx_buf) ||
+		   is_vmalloc_addr(xfer->rx_buf)) {
 		/* rx bounce buffer required */
 		rx_urb = ch341_alloc_urb(ch341, NULL, xfer->len);
 	} else {
@@ -172,7 +173,8 @@ static int ch341_spi_transfer_one(struct spi_controller *ctlr,
 
 	if (!ret && xfer->rx_buf) {
 		/* copy back if rx bounce buffer */
-		if (object_is_on_stack(xfer->rx_buf))
+		if (object_is_on_stack(xfer->rx_buf) ||
+		    is_vmalloc_addr(xfer->rx_buf))
 			memcpy(xfer->rx_buf, rx_urb->transfer_buffer, rx_urb->actual_length);
 
 		/* ch341 sends LSb first */
@@ -260,8 +262,6 @@ int ch341_spi_probe(struct ch341_device *ch341)
 	if (fwnode && is_of_node(fwnode))
 		ctlr->dev.of_node = to_of_node(fwnode);
 
-	// TODO bitbanged streaming protocol: SPI_CPHA ?
-	// TODO hardware supported: SPI_TX_DUAL | SPI_RX_DUAL;
 	ctlr->mode_bits = SPI_CPOL | SPI_CPHA | SPI_3WIRE | SPI_LSB_FIRST | SPI_NO_CS | SPI_CS_HIGH;
 	/*
 	 CH341 requires full duplex RX/TX but this is managed by this driver

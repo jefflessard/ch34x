@@ -347,18 +347,6 @@ int ch341_gpio_probe(struct ch341_device *ch341)
 #endif
 	ch341->gpio = gpio_chip;
 
-	/* Sync GPIO state */
-	ret = ch341_gpio_write_outputs(ch341, ch341->pins_dir, ch341->pins_state);
-	if (ret < 0) {
-		dev_err(ch341->dev, "Failed to set default state: %d\n", ret);
-		goto err_free_gpio;
-	}
-	ret = ch341_gpio_get_status(ch341, &ch341->pins_state);
-	if (ret < 0) {
-		dev_err(ch341->dev, "Failed to read state: %d\n", ret);
-		goto err_free_gpio;
-	}
-
 	/* configure irq chip */
 	ret = ch341_irq_probe(ch341);
 	if (ret) {
